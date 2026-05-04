@@ -1,0 +1,161 @@
+{
+  "info": {
+    "name": "Z-Speed 01 - Auth (Firebase Hybrid) & Users",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Firebase Auth as Identity Provider + NestJS JWT for API. Supports: Email/Password, Phone OTP, Google, Apple — all via Firebase SDK on client, verified on backend."
+  },
+  "variable": [
+    {"key": "base_url", "value": "http://localhost:3000/api/v1"},
+    {"key": "access_token", "value": ""},
+    {"key": "refresh_token", "value": ""},
+    {"key": "user_id", "value": ""},
+    {"key": "address_id", "value": ""}
+  ],
+  "item": [
+    {
+      "name": "Auth — Firebase Hybrid",
+      "item": [
+        {
+          "name": "POST Firebase Auth (All Providers)",
+          "event": [{"listen":"test","script":{"type":"text/javascript","exec":["var r=pm.response.json();","if(r.accessToken){","  pm.collectionVariables.set('access_token',r.accessToken);","  pm.collectionVariables.set('refresh_token',r.refreshToken);","  pm.collectionVariables.set('user_id',r.user.id);","}"]}}],
+          "request": {
+            "method": "POST",
+            "header": [{"key":"Content-Type","value":"application/json"}],
+            "url": {"raw":"{{base_url}}/auth/firebase","host":["{{base_url}}"],"path":["auth","firebase"]},
+            "body": {"mode":"raw","raw":"{\n  \"idToken\": \"FIREBASE_ID_TOKEN_FROM_CLIENT\",\n  \"role\": \"CUSTOMER\",\n  \"fcmToken\": \"device_fcm_token_optional\"\n}","options":{"raw":{"language":"json"}}}
+          },
+          "response": [
+            {"name":"200 — Email/Password Login","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"accessToken\": \"eyJhbGciOiJIUzI1NiJ9...\",\n  \"refreshToken\": \"eyJhbGciOiJIUzI1NiJ9...\",\n  \"isNewUser\": false,\n  \"user\": {\n    \"id\": \"uuid-123\",\n    \"firebaseUid\": \"fb_uid_abc\",\n    \"email\": \"ahmed@example.com\",\n    \"phone\": null,\n    \"name\": \"Ahmed Ali\",\n    \"role\": \"CUSTOMER\",\n    \"status\": \"ACTIVE\",\n    \"emailVerified\": true,\n    \"phoneVerified\": false,\n    \"profileImage\": null,\n    \"walletBalance\": 0.0,\n    \"loyaltyPoints\": 0\n  }\n}"},
+            {"name":"200 — Phone OTP (New User)","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"accessToken\": \"eyJhbG...\",\n  \"refreshToken\": \"eyJhbG...\",\n  \"isNewUser\": true,\n  \"user\": {\n    \"id\": \"uuid-456\",\n    \"firebaseUid\": \"fb_uid_phone\",\n    \"email\": null,\n    \"phone\": \"+201012345678\",\n    \"name\": \"Phone User\",\n    \"role\": \"CUSTOMER\",\n    \"status\": \"ACTIVE\",\n    \"emailVerified\": false,\n    \"phoneVerified\": true,\n    \"profileImage\": null\n  }\n}"},
+            {"name":"200 — Google Sign-In","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"accessToken\": \"eyJhbG...\",\n  \"refreshToken\": \"eyJhbG...\",\n  \"isNewUser\": true,\n  \"user\": {\n    \"id\": \"uuid-789\",\n    \"firebaseUid\": \"fb_uid_google\",\n    \"email\": \"user@gmail.com\",\n    \"googleId\": \"google_123456\",\n    \"name\": \"Ahmed Ali\",\n    \"role\": \"CUSTOMER\",\n    \"status\": \"ACTIVE\",\n    \"emailVerified\": true,\n    \"profileImage\": \"https://lh3.googleusercontent.com/photo.jpg\"\n  }\n}"},
+            {"name":"200 — Apple Sign-In","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"accessToken\": \"eyJhbG...\",\n  \"refreshToken\": \"eyJhbG...\",\n  \"isNewUser\": true,\n  \"user\": {\n    \"id\": \"uuid-abc\",\n    \"firebaseUid\": \"fb_uid_apple\",\n    \"email\": \"user@privaterelay.appleid.com\",\n    \"appleId\": \"000123.xxxxx\",\n    \"name\": \"Apple User\",\n    \"role\": \"CUSTOMER\",\n    \"status\": \"ACTIVE\",\n    \"emailVerified\": true\n  }\n}"},
+            {"name":"401 — Invalid Token","status":"Unauthorized","code":401,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"statusCode\": 401,\n  \"message\": \"Invalid or expired Firebase ID token\"\n}"},
+            {"name":"403 — Account Banned","status":"Forbidden","code":403,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"statusCode\": 403,\n  \"message\": \"Account is banned\"\n}"}
+          ]
+        },
+        {
+          "name": "POST Register Email (Fallback)",
+          "event": [{"listen":"test","script":{"type":"text/javascript","exec":["var r=pm.response.json();","if(r.accessToken){","  pm.collectionVariables.set('access_token',r.accessToken);","  pm.collectionVariables.set('refresh_token',r.refreshToken);","  pm.collectionVariables.set('user_id',r.user.id);","}"]}}],
+          "request": {
+            "method": "POST",
+            "header": [{"key":"Content-Type","value":"application/json"}],
+            "url": {"raw":"{{base_url}}/auth/register-email","host":["{{base_url}}"],"path":["auth","register-email"]},
+            "body": {"mode":"raw","raw":"{\n  \"name\": \"Ahmed Ali\",\n  \"email\": \"ahmed@example.com\",\n  \"password\": \"Str0ngPass123\",\n  \"phone\": \"01012345678\",\n  \"role\": \"CUSTOMER\"\n}","options":{"raw":{"language":"json"}}}
+          },
+          "response": [
+            {"name":"201 Created","status":"Created","code":201,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"accessToken\": \"eyJhbG...\",\n  \"refreshToken\": \"eyJhbG...\",\n  \"user\": {\n    \"id\": \"uuid\",\n    \"email\": \"ahmed@example.com\",\n    \"name\": \"Ahmed Ali\",\n    \"role\": \"CUSTOMER\",\n    \"status\": \"ACTIVE\",\n    \"emailVerified\": false,\n    \"phoneVerified\": false\n  }\n}"},
+            {"name":"409 Email Exists","status":"Conflict","code":409,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"statusCode\": 409,\n  \"message\": \"Email already registered\"\n}"}
+          ]
+        },
+        {
+          "name": "POST Refresh Token",
+          "event": [{"listen":"test","script":{"type":"text/javascript","exec":["var r=pm.response.json();","if(r.accessToken){","  pm.collectionVariables.set('access_token',r.accessToken);","  pm.collectionVariables.set('refresh_token',r.refreshToken);","}"]}}],
+          "request": {
+            "method": "POST",
+            "header": [{"key":"Content-Type","value":"application/json"}],
+            "url": {"raw":"{{base_url}}/auth/refresh","host":["{{base_url}}"],"path":["auth","refresh"]},
+            "body": {"mode":"raw","raw":"{\n  \"refreshToken\": \"{{refresh_token}}\"\n}","options":{"raw":{"language":"json"}}}
+          },
+          "response": [
+            {"name":"200","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"accessToken\": \"eyJhbG_NEW...\",\n  \"refreshToken\": \"eyJhbG_NEW...\"\n}"},
+            {"name":"401 Invalid","status":"Unauthorized","code":401,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"statusCode\": 401,\n  \"message\": \"Invalid refresh token\"\n}"}
+          ]
+        },
+        {
+          "name": "POST Logout",
+          "request": {
+            "method": "POST",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"}],
+            "url": {"raw":"{{base_url}}/auth/logout","host":["{{base_url}}"],"path":["auth","logout"]}
+          },
+          "response": [{"name":"200","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"message\": \"Logged out successfully\"\n}"}]
+        },
+        {
+          "name": "POST Link Provider",
+          "request": {
+            "method": "POST",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"},{"key":"Content-Type","value":"application/json"}],
+            "url": {"raw":"{{base_url}}/auth/link-provider","host":["{{base_url}}"],"path":["auth","link-provider"]},
+            "body": {"mode":"raw","raw":"{\n  \"firebaseIdToken\": \"FIREBASE_TOKEN_FROM_NEW_PROVIDER\"\n}","options":{"raw":{"language":"json"}}}
+          },
+          "response": [
+            {"name":"200 Phone Linked","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"message\": \"Provider linked successfully\",\n  \"user\": {\n    \"id\": \"uuid\",\n    \"email\": \"ahmed@example.com\",\n    \"phone\": \"+201012345678\",\n    \"emailVerified\": true,\n    \"phoneVerified\": true,\n    \"googleId\": null,\n    \"appleId\": null\n  }\n}"},
+            {"name":"409 Provider Already Linked","status":"Conflict","code":409,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"statusCode\": 409,\n  \"message\": \"This provider is already linked to another account\"\n}"}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "GET My Profile",
+          "request": {
+            "method": "GET",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"}],
+            "url": {"raw":"{{base_url}}/users/me","host":["{{base_url}}"],"path":["users","me"]}
+          },
+          "response": [{"name":"200","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"id\": \"uuid\",\n  \"firebaseUid\": \"fb_uid\",\n  \"email\": \"ahmed@example.com\",\n  \"phone\": \"+201012345678\",\n  \"name\": \"Ahmed Ali\",\n  \"role\": \"CUSTOMER\",\n  \"status\": \"ACTIVE\",\n  \"emailVerified\": true,\n  \"phoneVerified\": true,\n  \"walletBalance\": 150.0,\n  \"loyaltyPoints\": 320,\n  \"profileImage\": \"https://...\",\n  \"notificationPrefs\": {\"orderUpdates\":true,\"promotions\":false},\n  \"addresses\": [\n    {\n      \"id\": \"addr-uuid\",\n      \"label\": \"Home\",\n      \"street\": \"15 Tahrir St\",\n      \"city\": \"Cairo\",\n      \"latitude\": 30.0444,\n      \"longitude\": 31.2357,\n      \"isDefault\": true,\n      \"type\": \"home\"\n    }\n  ],\n  \"createdAt\": \"2025-01-01T00:00:00.000Z\"\n}"}]
+        },
+        {
+          "name": "PATCH Update Profile",
+          "request": {
+            "method": "PATCH",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"},{"key":"Content-Type","value":"application/json"}],
+            "url": {"raw":"{{base_url}}/users/me","host":["{{base_url}}"],"path":["users","me"]},
+            "body": {"mode":"raw","raw":"{\n  \"name\": \"Ahmed Ali Updated\",\n  \"phone\": \"01099999999\",\n  \"profileImage\": \"https://s3.example.com/photo.jpg\",\n  \"fcmTokens\": [\"token_device_1\", \"token_device_2\"],\n  \"notificationPrefs\": {\n    \"orderUpdates\": true,\n    \"promotions\": false\n  }\n}","options":{"raw":{"language":"json"}}}
+          },
+          "response": [{"name":"200","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"id\": \"uuid\",\n  \"name\": \"Ahmed Ali Updated\",\n  \"phone\": \"01099999999\",\n  \"profileImage\": \"https://s3.example.com/photo.jpg\"\n}"}]
+        },
+        {
+          "name": "POST Add Address",
+          "event": [{"listen":"test","script":{"type":"text/javascript","exec":["var r=pm.response.json(); if(r.id) pm.collectionVariables.set('address_id',r.id);"]}}],
+          "request": {
+            "method": "POST",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"},{"key":"Content-Type","value":"application/json"}],
+            "url": {"raw":"{{base_url}}/users/addresses","host":["{{base_url}}"],"path":["users","addresses"]},
+            "body": {"mode":"raw","raw":"{\n  \"label\": \"Home\",\n  \"street\": \"15 Tahrir St\",\n  \"building\": \"5\",\n  \"floor\": \"3\",\n  \"apartment\": \"12\",\n  \"city\": \"Cairo\",\n  \"latitude\": 30.0444,\n  \"longitude\": 31.2357,\n  \"type\": \"home\",\n  \"instructions\": \"Ring bell twice\"\n}","options":{"raw":{"language":"json"}}}
+          },
+          "response": [{"name":"201","status":"Created","code":201,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"id\": \"addr-uuid\",\n  \"userId\": \"user-uuid\",\n  \"label\": \"Home\",\n  \"street\": \"15 Tahrir St\",\n  \"building\": \"5\",\n  \"floor\": \"3\",\n  \"apartment\": \"12\",\n  \"city\": \"Cairo\",\n  \"latitude\": 30.0444,\n  \"longitude\": 31.2357,\n  \"isDefault\": false,\n  \"type\": \"home\",\n  \"instructions\": \"Ring bell twice\"\n}"}]
+        },
+        {
+          "name": "GET My Addresses",
+          "request": {
+            "method": "GET",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"}],
+            "url": {"raw":"{{base_url}}/users/addresses","host":["{{base_url}}"],"path":["users","addresses"]}
+          },
+          "response": [{"name":"200","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"[\n  {\n    \"id\": \"addr-uuid\",\n    \"label\": \"Home\",\n    \"street\": \"15 Tahrir St\",\n    \"city\": \"Cairo\",\n    \"latitude\": 30.0444,\n    \"longitude\": 31.2357,\n    \"isDefault\": true,\n    \"type\": \"home\"\n  }\n]"}]
+        },
+        {
+          "name": "PATCH Update Address",
+          "request": {
+            "method": "PATCH",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"},{"key":"Content-Type","value":"application/json"}],
+            "url": {"raw":"{{base_url}}/users/addresses/{{address_id}}","host":["{{base_url}}"],"path":["users","addresses","{{address_id}}"]},
+            "body": {"mode":"raw","raw":"{\n  \"label\": \"Work\",\n  \"street\": \"25 Nasr City\"\n}","options":{"raw":{"language":"json"}}}
+          },
+          "response": [{"name":"200","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"id\": \"addr-uuid\",\n  \"label\": \"Work\",\n  \"street\": \"25 Nasr City\"\n}"}]
+        },
+        {
+          "name": "DELETE Address",
+          "request": {
+            "method": "DELETE",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"}],
+            "url": {"raw":"{{base_url}}/users/addresses/{{address_id}}","host":["{{base_url}}"],"path":["users","addresses","{{address_id}}"]}
+          },
+          "response": [{"name":"200","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"message\": \"Address deleted\"\n}"}]
+        },
+        {
+          "name": "PATCH Set Default Address",
+          "request": {
+            "method": "PATCH",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"}],
+            "url": {"raw":"{{base_url}}/users/addresses/{{address_id}}/default","host":["{{base_url}}"],"path":["users","addresses","{{address_id}}","default"]}
+          },
+          "response": [{"name":"200","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"message\": \"Default address updated\"\n}"}]
+        }
+      ]
+    }
+  ]
+}

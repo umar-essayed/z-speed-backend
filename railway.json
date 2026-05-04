@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 2,
+  "phases": {
+    "plugin": {
+      "release": {
+        "command": "npx prisma migrate deploy"
+      }
+    }
+  },
+  "services": {
+    "z-speed-backend": {
+      "source": {
+      },
+      "build": {
+        "builder": "NIXPACKS"
+      },
+      "deploy": {
+        "startCommand": "npm run start:prod",
+        "healthCheckPath": "/api/v1/health",
+        "healthCheckTimeout": 30
+      }
+    }
+  }
+}

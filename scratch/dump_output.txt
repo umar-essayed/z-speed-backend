@@ -1,0 +1,30 @@
+--- USERS ---
+┌─────────┬────────────────────────────────────────┬──────────────────────────────────────┬────────────┐
+│ (index) │ id                                     │ email                                │ role       │
+├─────────┼────────────────────────────────────────┼──────────────────────────────────────┼────────────┤
+│ 0       │ '33a2c9e7-04ac-41d8-b13a-76afad459b84' │ 'ozex.me.11@gmail.com'               │ 'CUSTOMER' │
+│ 1       │ '3f86883f-c2e0-4c9f-9a37-00259537b39b' │ 'customer_1777407419782@example.com' │ 'CUSTOMER' │
+│ 2       │ '4b146d23-8089-4162-b611-0b7f50c32c98' │ 'customer@zspeed.app'                │ 'CUSTOMER' │
+│ 3       │ '6ee237d7-2c83-4475-b866-79797416dba7' │ 'customer_1777407055854@example.com' │ 'CUSTOMER' │
+│ 4       │ '84cad997-b41a-4d3c-867f-d2dbb72a7fc9' │ 'omaressayed877@gmail.com'           │ 'CUSTOMER' │
+└─────────┴────────────────────────────────────────┴──────────────────────────────────────┴────────────┘
+
+--- RESTAURANTS & ITEMS ---
+Restaurant: The Good Burger (19436cd0-b631-44de-87cb-5fda6e197d58)
+  - Item: Classic Cheeseburger (c8d3a8f9-305b-477d-bc08-e0c84b04ab54) Price: 35
+Restaurant: Test Restaurant (1e919d99-031e-4ce3-adbb-396399fb40eb)
+Restaurant: Test Restaurant (298414ff-5822-4a5c-bef1-5e335b2a5c0f)
+  - Item: برجر (4fffa9e9-5519-4b56-affe-0ea5ea6b28b6) Price: 160
+  - Item: Classic Burgeق (048c50ab-75a6-48a3-8758-ce36ecd18d40) Price: 160
+  - Item: برجر (bd59601d-008c-40f3-b8d0-90fc0f7f98e4) Price: 165
+Restaurant: The Good Burger (3df37d51-4232-4e67-9471-dc1fa6c61618)
+  - Item: Classic Cheeseburger (e9b82231-6078-4a8e-9e1c-d13793cf568e) Price: 35
+Restaurant: The Good Burger (6fae26f3-80e1-4190-8cab-a7861513840b)
+  - Item: Classic Cheeseburger (b3ddd413-629c-4eca-af8c-48b1dda7c818) Price: 35
+
+--- DRIVERS ---
+Driver: driver_1777406749635@example.com (0181261c-5175-40ad-83c2-3248a4ecd28d) UserID: 58459166-449b-4681-a6e0-a3a1a693b162
+Driver: driver_1777407055854@example.com (2a2762dd-aa18-4668-a012-c3b5986fd250) UserID: efc0badb-1f6b-49db-9b0d-4492be8bd566
+Driver: driver_1777407233566@example.com (64430d34-1818-471e-ad7d-84b592bbcdb4) UserID: b0544c0b-647c-430e-b047-3713272fadd7
+Driver: driver_1777407376881@example.com (7857e03d-844e-4420-adc8-564d976078df) UserID: e8a42c1c-cf85-4129-89d8-bd4e537933ab
+Driver: driver_1777406853272@example.com (7c9321ec-84c8-4b66-b13c-f4a00579c51f) UserID: 2549d0bc-ee36-4276-8c33-f8fa74196a39

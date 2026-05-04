@@ -1,0 +1,248 @@
+{
+  "info": {
+    "name": "Z-Speed 03 - Orders & Drivers & Wallet",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Orders, Payments, Drivers, DeliveryRequests, Wallet, Ledger — matched to Prisma schema"
+  },
+  "variable": [
+    {"key": "base_url", "value": "http://localhost:3000/api/v1"},
+    {"key": "access_token", "value": ""},
+    {"key": "order_id", "value": ""},
+    {"key": "restaurant_id", "value": ""},
+    {"key": "request_id", "value": ""}
+  ],
+  "item": [
+    {
+      "name": "Orders — Customer",
+      "item": [
+        {
+          "name": "POST Checkout",
+          "event": [{"listen":"test","script":{"type":"text/javascript","exec":["var r=pm.response.json(); if(r.id) pm.collectionVariables.set('order_id',r.id);"]}}],
+          "request": {
+            "method": "POST",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"},{"key":"Content-Type","value":"application/json"}],
+            "url": {"raw":"{{base_url}}/orders/checkout","host":["{{base_url}}"],"path":["orders","checkout"]},
+            "body": {"mode":"raw","raw":"{\n  \"restaurantId\": \"{{restaurant_id}}\",\n  \"deliveryAddressId\": \"ADDRESS_UUID\",\n  \"paymentMethod\": \"CASH\",\n  \"promoCode\": null,\n  \"customerNote\": \"Please ring the bell\"\n}","options":{"raw":{"language":"json"}}}
+          },
+          "response": [{"name":"201 Order Created (CASH)","status":"Created","code":201,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"id\": \"order-uuid\",\n  \"customerId\": \"user-uuid\",\n  \"restaurantId\": \"rest-uuid\",\n  \"driverId\": null,\n  \"status\": \"PENDING\",\n  \"subtotal\": 179.98,\n  \"deliveryFee\": 15.0,\n  \"serviceFee\": 3.6,\n  \"tax\": 0.0,\n  \"discount\": 0.0,\n  \"total\": 198.58,\n  \"paymentMethod\": \"CASH\",\n  \"paymentState\": \"PENDING\",\n  \"deliveryAddress\": \"15 Tahrir St, Cairo\",\n  \"deliveryLat\": 30.0444,\n  \"deliveryLng\": 31.2357,\n  \"customerNote\": \"Please ring the bell\",\n  \"createdAt\": \"2025-01-01T00:00:00.000Z\",\n  \"items\": [\n    {\n      \"id\": \"oi-uuid\",\n      \"foodItemId\": \"food-uuid\",\n      \"quantity\": 2,\n      \"unitPrice\": 89.99,\n      \"selectedAddons\": [{\"name\":\"Extra sauce\",\"price\":5}],\n      \"specialNote\": \"No spicy\"\n    }\n  ]\n}"}]
+        },
+        {
+          "name": "POST Checkout (WALLET)",
+          "request": {
+            "method": "POST",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"},{"key":"Content-Type","value":"application/json"}],
+            "url": {"raw":"{{base_url}}/orders/checkout","host":["{{base_url}}"],"path":["orders","checkout"]},
+            "body": {"mode":"raw","raw":"{\n  \"restaurantId\": \"{{restaurant_id}}\",\n  \"deliveryAddressId\": \"ADDRESS_UUID\",\n  \"paymentMethod\": \"WALLET\"\n}","options":{"raw":{"language":"json"}}}
+          },
+          "response": [{"name":"201 Paid from Wallet","status":"Created","code":201,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"id\": \"order-uuid\",\n  \"paymentMethod\": \"WALLET\",\n  \"paymentState\": \"PAID\",\n  \"total\": 198.58\n}"},{"name":"400 Insufficient Balance","status":"Bad Request","code":400,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"statusCode\": 400,\n  \"message\": \"Insufficient wallet balance\"\n}"}]
+        },
+        {
+          "name": "POST Checkout (CYBERSOURCE_CARD)",
+          "request": {
+            "method": "POST",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"},{"key":"Content-Type","value":"application/json"}],
+            "url": {"raw":"{{base_url}}/orders/checkout","host":["{{base_url}}"],"path":["orders","checkout"]},
+            "body": {"mode":"raw","raw":"{\n  \"restaurantId\": \"{{restaurant_id}}\",\n  \"deliveryAddressId\": \"ADDRESS_UUID\",\n  \"paymentMethod\": \"CYBERSOURCE_CARD\",\n  \"deviceInformation\": {\"ipAddress\": \"192.168.1.1\"},\n  \"billingInformation\": {\n    \"firstName\": \"Ahmed\",\n    \"lastName\": \"Ali\",\n    \"email\": \"customer@test.com\",\n    \"country\": \"EG\",\n    \"city\": \"Cairo\"\n  }\n}","options":{"raw":{"language":"json"}}}
+          },
+          "response": [{"name":"201 + flexToken","status":"Created","code":201,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"id\": \"order-uuid\",\n  \"paymentMethod\": \"CYBERSOURCE_CARD\",\n  \"paymentState\": \"PENDING\",\n  \"flexToken\": \"eyJ...\",\n  \"paymentUrl\": \"https://apitest.cybersource.com/...\"\n}"}]
+        },
+        {
+          "name": "POST Validate Promo",
+          "request": {
+            "method": "POST",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"},{"key":"Content-Type","value":"application/json"}],
+            "url": {"raw":"{{base_url}}/orders/validate-promo","host":["{{base_url}}"],"path":["orders","validate-promo"]},
+            "body": {"mode":"raw","raw":"{\n  \"code\": \"SAVE20\",\n  \"subtotal\": 200.0\n}","options":{"raw":{"language":"json"}}}
+          },
+          "response": [{"name":"200 Valid","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"valid\": true,\n  \"discount\": 40.0,\n  \"message\": \"20% off applied\"\n}"},{"name":"400 Invalid","status":"Bad Request","code":400,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"valid\": false,\n  \"message\": \"Promo code expired or invalid\"\n}"}]
+        },
+        {
+          "name": "GET Flex Token (CyberSource)",
+          "request": {
+            "method": "GET",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"}],
+            "url": {"raw":"{{base_url}}/orders/payment/flex-token","host":["{{base_url}}"],"path":["orders","payment","flex-token"]}
+          },
+          "response": [{"name":"200","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"captureContext\": \"eyJ...\"\n}"}]
+        },
+        {
+          "name": "POST Payment Callback [NO AUTH]",
+          "request": {
+            "method": "POST",
+            "header": [{"key":"Content-Type","value":"application/json"}],
+            "url": {"raw":"{{base_url}}/orders/payment/callback","host":["{{base_url}}"],"path":["orders","payment","callback"]},
+            "body": {"mode":"raw","raw":"{\n  \"decision\": \"ACCEPT\",\n  \"req_reference_number\": \"order-uuid\",\n  \"req_transaction_type\": \"sale\",\n  \"auth_amount\": \"198.58\",\n  \"signature\": \"HMAC_SHA256_SIGNATURE\"\n}","options":{"raw":{"language":"json"}}}
+          },
+          "response": [{"name":"200 Payment Accepted","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"message\": \"Payment processed\",\n  \"paymentState\": \"PAID\"\n}"}]
+        },
+        {
+          "name": "GET My Orders",
+          "request": {
+            "method": "GET",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"}],
+            "url": {"raw":"{{base_url}}/orders/my?page=1&limit=10&status=PENDING","host":["{{base_url}}"],"path":["orders","my"],"query":[{"key":"page","value":"1"},{"key":"limit","value":"10"},{"key":"status","value":"PENDING","disabled":true}]}
+          },
+          "response": [{"name":"200","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"data\": [{\"id\":\"order-uuid\",\"status\":\"PENDING\",\"total\":198.58,\"paymentState\":\"PENDING\",\"createdAt\":\"2025-01-01T00:00:00.000Z\",\"restaurant\":{\"name\":\"Cairo Grill\"}}],\n  \"total\": 1,\n  \"page\": 1\n}"}]
+        },
+        {
+          "name": "GET Order By ID",
+          "request": {
+            "method": "GET",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"}],
+            "url": {"raw":"{{base_url}}/orders/{{order_id}}","host":["{{base_url}}"],"path":["orders","{{order_id}}"]}
+          },
+          "response": [{"name":"200 Full Order","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"id\": \"order-uuid\",\n  \"customerId\": \"user-uuid\",\n  \"restaurantId\": \"rest-uuid\",\n  \"driverId\": null,\n  \"status\": \"PENDING\",\n  \"subtotal\": 179.98,\n  \"deliveryFee\": 15.0,\n  \"serviceFee\": 3.6,\n  \"tax\": 0.0,\n  \"discount\": 0.0,\n  \"total\": 198.58,\n  \"paymentMethod\": \"CASH\",\n  \"paymentState\": \"PENDING\",\n  \"deliveryAddress\": \"15 Tahrir St\",\n  \"deliveryLat\": 30.0444,\n  \"deliveryLng\": 31.2357,\n  \"customerNote\": null,\n  \"createdAt\": \"2025-01-01T00:00:00.000Z\",\n  \"acceptedAt\": null,\n  \"preparingAt\": null,\n  \"readyAt\": null,\n  \"driverAssignedAt\": null,\n  \"deliveredAt\": null,\n  \"items\": [],\n  \"deliveryRequests\": [],\n  \"reviews\": []\n}"}]
+        },
+        {
+          "name": "PATCH Cancel Order",
+          "request": {
+            "method": "PATCH",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"},{"key":"Content-Type","value":"application/json"}],
+            "url": {"raw":"{{base_url}}/orders/{{order_id}}/cancel","host":["{{base_url}}"],"path":["orders","{{order_id}}","cancel"]},
+            "body": {"mode":"raw","raw":"{\n  \"reason\": \"Changed my mind\"\n}","options":{"raw":{"language":"json"}}}
+          },
+          "response": [{"name":"200 Cancelled","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"id\": \"order-uuid\",\n  \"status\": \"CANCELLED\"\n}"}]
+        },
+        {
+          "name": "POST Create Dispute",
+          "request": {
+            "method": "POST",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"},{"key":"Content-Type","value":"application/json"}],
+            "url": {"raw":"{{base_url}}/orders/{{order_id}}/dispute","host":["{{base_url}}"],"path":["orders","{{order_id}}","dispute"]},
+            "body": {"mode":"raw","raw":"{\n  \"reason\": \"Missing items in my order\"\n}","options":{"raw":{"language":"json"}}}
+          },
+          "response": [{"name":"201","status":"Created","code":201,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"message\": \"Dispute created and sent to admin\"\n}"}]
+        }
+      ]
+    },
+    {
+      "name": "Orders — Vendor",
+      "item": [
+        {
+          "name": "GET Vendor Orders",
+          "request": {
+            "method": "GET",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"}],
+            "url": {"raw":"{{base_url}}/vendor/orders?status=PENDING&page=1&limit=20","host":["{{base_url}}"],"path":["vendor","orders"],"query":[{"key":"status","value":"PENDING"},{"key":"page","value":"1"},{"key":"limit","value":"20"}]}
+          },
+          "response": [{"name":"200","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"data\": [{\"id\":\"order-uuid\",\"status\":\"PENDING\",\"total\":198.58,\"customer\":{\"name\":\"Ahmed Ali\",\"phone\":\"01012345678\"}}],\n  \"total\": 1\n}"}]
+        },
+        {
+          "name": "PATCH Update Order Status",
+          "request": {
+            "method": "PATCH",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"},{"key":"Content-Type","value":"application/json"}],
+            "url": {"raw":"{{base_url}}/vendor/orders/{{order_id}}/status","host":["{{base_url}}"],"path":["vendor","orders","{{order_id}}","status"]},
+            "body": {"mode":"raw","raw":"{\n  \"status\": \"CONFIRMED\"\n}","options":{"raw":{"language":"json"}}}
+          },
+          "response": [{"name":"200 CONFIRMED","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"id\": \"order-uuid\",\n  \"status\": \"CONFIRMED\",\n  \"acceptedAt\": \"2025-01-01T00:05:00.000Z\"\n}"},{"name":"400 Invalid Transition","status":"Bad Request","code":400,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"statusCode\": 400,\n  \"message\": \"Cannot transition from DELIVERED to CONFIRMED\"\n}"}]
+        }
+      ]
+    },
+    {
+      "name": "Drivers",
+      "item": [
+        {
+          "name": "POST Apply as Driver",
+          "request": {
+            "method": "POST",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"},{"key":"Content-Type","value":"application/json"}],
+            "url": {"raw":"{{base_url}}/drivers/apply","host":["{{base_url}}"],"path":["drivers","apply"]},
+            "body": {"mode":"raw","raw":"{\n  \"nationalId\": \"29901011234567\",\n  \"nationalIdUrl\": \"https://s3.example.com/national-id.jpg\",\n  \"driverLicenseUrl\": \"https://s3.example.com/license.jpg\",\n  \"dateOfBirth\": \"1990-01-01T00:00:00Z\",\n  \"bankInfo\": {\n    \"bankName\": \"Banque Misr\",\n    \"accountHolderName\": \"Mohamed Ali\",\n    \"accountNumber\": \"1234567890123456\",\n    \"iban\": \"EG120002000000000123456789012\"\n  },\n  \"payoutPhoneNumber\": \"01012345678\",\n  \"vehicle\": {\n    \"type\": \"motorcycle\",\n    \"make\": \"Honda\",\n    \"model\": \"CBR\",\n    \"year\": 2022,\n    \"plateNumber\": \"ABC-123\",\n    \"color\": \"Red\",\n    \"registrationDocUrl\": \"https://s3.example.com/reg.jpg\",\n    \"insuranceDocUrl\": \"https://s3.example.com/insurance.jpg\"\n  }\n}","options":{"raw":{"language":"json"}}}
+          },
+          "response": [{"name":"200 UNDER_REVIEW","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"id\": \"dp-uuid\",\n  \"userId\": \"user-uuid\",\n  \"nationalId\": \"29901011234567\",\n  \"applicationStatus\": \"UNDER_REVIEW\",\n  \"vehicle\": {\n    \"id\": \"v-uuid\",\n    \"type\": \"motorcycle\",\n    \"make\": \"Honda\",\n    \"plateNumber\": \"ABC-123\"\n  }\n}"}]
+        },
+        {
+          "name": "PATCH Toggle Availability",
+          "request": {
+            "method": "PATCH",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"},{"key":"Content-Type","value":"application/json"}],
+            "url": {"raw":"{{base_url}}/drivers/availability","host":["{{base_url}}"],"path":["drivers","availability"]},
+            "body": {"mode":"raw","raw":"{\n  \"isAvailable\": true\n}","options":{"raw":{"language":"json"}}}
+          },
+          "response": [{"name":"200","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"message\": \"Availability updated\",\n  \"isAvailable\": true\n}"}]
+        },
+        {
+          "name": "PATCH Update Location",
+          "request": {
+            "method": "PATCH",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"},{"key":"Content-Type","value":"application/json"}],
+            "url": {"raw":"{{base_url}}/drivers/location","host":["{{base_url}}"],"path":["drivers","location"]},
+            "body": {"mode":"raw","raw":"{\n  \"currentLat\": 30.0500,\n  \"currentLng\": 31.2400\n}","options":{"raw":{"language":"json"}}}
+          },
+          "response": [{"name":"200","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"currentLat\": 30.0500,\n  \"currentLng\": 31.2400,\n  \"geohash\": \"stq4s3...\",\n  \"lastPingAt\": \"2025-01-01T12:00:00.000Z\"\n}"}]
+        },
+        {
+          "name": "GET Delivery Requests",
+          "request": {
+            "method": "GET",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"}],
+            "url": {"raw":"{{base_url}}/drivers/delivery-requests","host":["{{base_url}}"],"path":["drivers","delivery-requests"]}
+          },
+          "response": [{"name":"200","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"[\n  {\n    \"id\": \"dr-uuid\",\n    \"orderId\": \"order-uuid\",\n    \"driverId\": \"dp-uuid\",\n    \"status\": \"PENDING\",\n    \"deliveryFee\": 15.0,\n    \"estimatedDistance\": 3.5,\n    \"expiresAt\": \"2025-01-01T12:05:00.000Z\",\n    \"order\": {\n      \"restaurantId\": \"rest-uuid\",\n      \"deliveryAddress\": \"15 Tahrir St\",\n      \"deliveryLat\": 30.0444,\n      \"deliveryLng\": 31.2357\n    }\n  }\n]"}]
+        },
+        {
+          "name": "PATCH Accept Request",
+          "request": {
+            "method": "PATCH",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"}],
+            "url": {"raw":"{{base_url}}/drivers/delivery-requests/{{request_id}}/accept","host":["{{base_url}}"],"path":["drivers","delivery-requests","{{request_id}}","accept"]}
+          },
+          "response": [{"name":"200 Accepted","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"message\": \"Delivery request accepted\",\n  \"order\": {\n    \"id\": \"order-uuid\",\n    \"status\": \"IN_PROGRESS\",\n    \"driverAssignedAt\": \"2025-01-01T12:02:00.000Z\"\n  }\n}"}]
+        },
+        {
+          "name": "PATCH Reject Request",
+          "request": {
+            "method": "PATCH",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"},{"key":"Content-Type","value":"application/json"}],
+            "url": {"raw":"{{base_url}}/drivers/delivery-requests/{{request_id}}/reject","host":["{{base_url}}"],"path":["drivers","delivery-requests","{{request_id}}","reject"]},
+            "body": {"mode":"raw","raw":"{\n  \"reason\": \"Too far\"\n}","options":{"raw":{"language":"json"}}}
+          },
+          "response": [{"name":"200 Rejected","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"message\": \"Delivery request rejected\"\n}"}]
+        },
+        {
+          "name": "GET My Driver Orders",
+          "request": {
+            "method": "GET",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"}],
+            "url": {"raw":"{{base_url}}/drivers/my-orders?page=1&limit=10","host":["{{base_url}}"],"path":["drivers","my-orders"],"query":[{"key":"page","value":"1"},{"key":"limit","value":"10"}]}
+          },
+          "response": [{"name":"200","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"data\": [{\"id\":\"order-uuid\",\"status\":\"IN_PROGRESS\",\"total\":198.58,\"deliveryFee\":15.0,\"restaurant\":{\"name\":\"Cairo Grill\",\"address\":\"123 Cairo St\"}}],\n  \"total\": 1\n}"}]
+        },
+        {
+          "name": "GET Earnings",
+          "request": {
+            "method": "GET",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"}],
+            "url": {"raw":"{{base_url}}/drivers/earnings","host":["{{base_url}}"],"path":["drivers","earnings"]}
+          },
+          "response": [{"name":"200","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"totalEarnings\": 5000.0,\n  \"walletBalance\": 1500.0,\n  \"totalTrips\": 150,\n  \"acceptanceRate\": 92.5,\n  \"rating\": 4.8,\n  \"ratingCount\": 130\n}"}]
+        }
+      ]
+    },
+    {
+      "name": "Wallet & Ledger",
+      "item": [
+        {
+          "name": "GET Ledger",
+          "request": {
+            "method": "GET",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"}],
+            "url": {"raw":"{{base_url}}/wallet/ledger?page=1&limit=20&type=EARNING","host":["{{base_url}}"],"path":["wallet","ledger"],"query":[{"key":"page","value":"1"},{"key":"limit","value":"20"},{"key":"type","value":"EARNING","disabled":true}]}
+          },
+          "response": [{"name":"200","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"data\": [\n    {\n      \"id\": \"led-uuid\",\n      \"userId\": \"user-uuid\",\n      \"orderId\": \"order-uuid\",\n      \"type\": \"EARNING\",\n      \"amount\": 150.0,\n      \"status\": \"completed\",\n      \"createdAt\": \"2025-01-01T00:00:00.000Z\"\n    }\n  ],\n  \"total\": 1\n}"}]
+        },
+        {
+          "name": "POST Request Payout",
+          "request": {
+            "method": "POST",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"},{"key":"Content-Type","value":"application/json"}],
+            "url": {"raw":"{{base_url}}/wallet/payout","host":["{{base_url}}"],"path":["wallet","payout"]},
+            "body": {"mode":"raw","raw":"{\n  \"amount\": 500.0\n}","options":{"raw":{"language":"json"}}}
+          },
+          "response": [{"name":"201 Payout Requested","status":"Created","code":201,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"message\": \"Payout request submitted for admin approval\",\n  \"ledger\": {\n    \"id\": \"led-uuid\",\n    \"type\": \"PAYOUT\",\n    \"amount\": 500.0,\n    \"status\": \"pending\"\n  }\n}"},{"name":"400 Insufficient","status":"Bad Request","code":400,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"statusCode\": 400,\n  \"message\": \"Amount exceeds wallet balance\"\n}"}]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+services:
+  z-speed-backend:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=redis://redis:6379
+      - PORT=3000
+    depends_on:
+      - redis
+    networks:
+      - z-speed-network
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - z-speed-network
+
+networks:
+  z-speed-network:
+    driver: bridge

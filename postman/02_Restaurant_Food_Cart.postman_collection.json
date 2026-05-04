@@ -1,0 +1,244 @@
+{
+  "info": {
+    "name": "Z-Speed 02 - Restaurant & Food & Cart",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Restaurants, MenuSections, FoodItems, Cart — matched to Prisma schema"
+  },
+  "variable": [
+    {"key": "base_url", "value": "http://localhost:3000/api/v1"},
+    {"key": "access_token", "value": ""},
+    {"key": "restaurant_id", "value": ""},
+    {"key": "section_id", "value": ""},
+    {"key": "food_item_id", "value": ""},
+    {"key": "cart_item_id", "value": ""}
+  ],
+  "item": [
+    {
+      "name": "Restaurants (Public)",
+      "item": [
+        {
+          "name": "GET List Restaurants",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {"raw":"{{base_url}}/restaurants?page=1&limit=20","host":["{{base_url}}"],"path":["restaurants"],"query":[{"key":"page","value":"1"},{"key":"limit","value":"20"},{"key":"city","value":"Cairo","disabled":true},{"key":"isOpen","value":"true","disabled":true},{"key":"cuisineTypeId","value":"","disabled":true}]}
+          },
+          "response": [{"name":"200 List","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"data\": [\n    {\n      \"id\": \"rest-uuid\",\n      \"name\": \"Cairo Grill\",\n      \"nameAr\": \"كايرو جريل\",\n      \"description\": \"Best grilled food\",\n      \"logoUrl\": \"https://s3.example.com/logo.jpg\",\n      \"coverImageUrl\": null,\n      \"isOpen\": true,\n      \"status\": \"ACTIVE\",\n      \"vendorType\": \"food\",\n      \"address\": \"123 Cairo St\",\n      \"latitude\": 30.0444,\n      \"longitude\": 31.2357,\n      \"deliveryFee\": 15.0,\n      \"minimumOrder\": 50.0,\n      \"deliveryTimeMin\": 30,\n      \"deliveryTimeMax\": 60,\n      \"rating\": 4.5,\n      \"ratingCount\": 120,\n      \"cuisineTypes\": [{\"id\": \"ct-uuid\", \"name\": \"Grills\", \"nameAr\": \"مشويات\"}]\n    }\n  ],\n  \"total\": 1,\n  \"page\": 1,\n  \"limit\": 20\n}"}]
+        },
+        {
+          "name": "GET Restaurant By ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {"raw":"{{base_url}}/restaurants/{{restaurant_id}}","host":["{{base_url}}"],"path":["restaurants","{{restaurant_id}}"]}
+          },
+          "response": [{"name":"200 Detail","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"id\": \"rest-uuid\",\n  \"ownerId\": \"user-uuid\",\n  \"name\": \"Cairo Grill\",\n  \"nameAr\": \"كايرو جريل\",\n  \"description\": \"Best grilled food\",\n  \"descriptionAr\": null,\n  \"logoUrl\": null,\n  \"coverImageUrl\": null,\n  \"isActive\": true,\n  \"isOpen\": true,\n  \"status\": \"ACTIVE\",\n  \"vendorType\": \"food\",\n  \"address\": \"123 Cairo St\",\n  \"latitude\": 30.0444,\n  \"longitude\": 31.2357,\n  \"deliveryRadiusKm\": 5.0,\n  \"deliveryTimeMin\": 30,\n  \"deliveryTimeMax\": 60,\n  \"deliveryFeeMode\": \"fixed\",\n  \"deliveryFee\": 15.0,\n  \"deliveryFeeTiers\": null,\n  \"minimumOrder\": 50.0,\n  \"rating\": 4.5,\n  \"ratingCount\": 120,\n  \"walletBalance\": 5000.0,\n  \"totalEarnings\": 25000.0,\n  \"payoutPhoneNumber\": \"01012345678\",\n  \"workingHours\": {\"sun\":{\"open\":\"09:00\",\"close\":\"23:00\"}},\n  \"documentUrls\": [\"https://example.com/doc.pdf\"],\n  \"cuisineTypes\": [],\n  \"menuSections\": []\n}"}]
+        },
+        {
+          "name": "GET Restaurant Menu",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {"raw":"{{base_url}}/restaurants/{{restaurant_id}}/menu","host":["{{base_url}}"],"path":["restaurants","{{restaurant_id}}","menu"]}
+          },
+          "response": [{"name":"200 Menu","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"[\n  {\n    \"id\": \"sec-uuid\",\n    \"name\": \"Main Dishes\",\n    \"nameAr\": \"الأطباق الرئيسية\",\n    \"isActive\": true,\n    \"sortOrder\": 1,\n    \"items\": [\n      {\n        \"id\": \"food-uuid\",\n        \"name\": \"Grilled Chicken\",\n        \"description\": \"Fresh grilled\",\n        \"imageUrl\": null,\n        \"price\": 89.99,\n        \"originalPrice\": null,\n        \"isOnSale\": false,\n        \"isAvailable\": true,\n        \"addons\": [{\"name\":\"Extra sauce\",\"price\":5}],\n        \"allergens\": [],\n        \"prepTimeMin\": 20\n      }\n    ]\n  }\n]"}]
+        }
+      ]
+    },
+    {
+      "name": "Vendor — Restaurant Mgmt",
+      "item": [
+        {
+          "name": "POST Create Restaurant",
+          "event": [{"listen":"test","script":{"type":"text/javascript","exec":["var res = pm.response.json();","if(res.id){ pm.collectionVariables.set('restaurant_id', res.id); }"]}}],
+          "request": {
+            "method": "POST",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"},{"key":"Content-Type","value":"application/json"}],
+            "url": {"raw":"{{base_url}}/vendor/restaurants","host":["{{base_url}}"],"path":["vendor","restaurants"]},
+            "body": {"mode":"raw","raw":"{\n  \"name\": \"Cairo Grill\",\n  \"nameAr\": \"كايرو جريل\",\n  \"latitude\": 30.0444,\n  \"longitude\": 31.2357,\n  \"address\": \"123 Cairo St\",\n  \"city\": \"Cairo\",\n  \"vendorType\": \"food\",\n  \"payoutPhoneNumber\": \"01012345678\",\n  \"bankInfo\": {\n    \"bankName\": \"CIB\",\n    \"accountHolderName\": \"Cairo Grill LLC\",\n    \"accountNumber\": \"100020003000\",\n    \"iban\": \"EG450002000000000123456789012\"\n  },\n  \"documentUrls\": [\"https://s3.example.com/license.pdf\"]\n}","options":{"raw":{"language":"json"}}}
+          },
+          "response": [{"name":"201 Created (PENDING_VERIFICATION)","status":"Created","code":201,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"id\": \"rest-uuid\",\n  \"ownerId\": \"user-uuid\",\n  \"name\": \"Cairo Grill\",\n  \"status\": \"PENDING_VERIFICATION\",\n  \"isOpen\": false,\n  \"isActive\": true,\n  \"createdAt\": \"2025-01-01T00:00:00.000Z\"\n}"}]
+        },
+        {
+          "name": "GET My Restaurants",
+          "request": {
+            "method": "GET",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"}],
+            "url": {"raw":"{{base_url}}/vendor/restaurants/my","host":["{{base_url}}"],"path":["vendor","restaurants","my"]}
+          },
+          "response": [{"name":"200","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"[\n  {\n    \"id\": \"rest-uuid\",\n    \"name\": \"Cairo Grill\",\n    \"status\": \"ACTIVE\",\n    \"isOpen\": true,\n    \"rating\": 4.5,\n    \"walletBalance\": 5000.0,\n    \"totalEarnings\": 25000.0\n  }\n]"}]
+        },
+        {
+          "name": "PATCH Update Restaurant",
+          "request": {
+            "method": "PATCH",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"},{"key":"Content-Type","value":"application/json"}],
+            "url": {"raw":"{{base_url}}/vendor/restaurants/{{restaurant_id}}","host":["{{base_url}}"],"path":["vendor","restaurants","{{restaurant_id}}"]},
+            "body": {"mode":"raw","raw":"{\n  \"name\": \"Cairo Grill Updated\",\n  \"description\": \"Best food in Cairo\",\n  \"descriptionAr\": \"أفضل أكل في القاهرة\",\n  \"logoUrl\": \"https://s3.example.com/logo.png\",\n  \"coverImageUrl\": \"https://s3.example.com/cover.png\",\n  \"workingHours\": {\n    \"sun\": {\"open\": \"09:00\", \"close\": \"23:00\"},\n    \"mon\": {\"open\": \"09:00\", \"close\": \"23:00\"}\n  }\n}","options":{"raw":{"language":"json"}}}
+          },
+          "response": [{"name":"200","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"id\": \"rest-uuid\",\n  \"name\": \"Cairo Grill Updated\",\n  \"updatedAt\": \"2025-01-02T00:00:00.000Z\"\n}"}]
+        },
+        {
+          "name": "PATCH Delivery Settings",
+          "request": {
+            "method": "PATCH",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"},{"key":"Content-Type","value":"application/json"}],
+            "url": {"raw":"{{base_url}}/vendor/restaurants/{{restaurant_id}}/delivery-settings","host":["{{base_url}}"],"path":["vendor","restaurants","{{restaurant_id}}","delivery-settings"]},
+            "body": {"mode":"raw","raw":"{\n  \"deliveryRadiusKm\": 5.0,\n  \"deliveryTimeMin\": 30,\n  \"deliveryTimeMax\": 60,\n  \"deliveryFeeMode\": \"fixed\",\n  \"deliveryFee\": 15.0,\n  \"minimumOrder\": 50.0,\n  \"deliveryFeeTiers\": [\n    {\"maxKm\": 3, \"fee\": 10},\n    {\"maxKm\": 5, \"fee\": 15}\n  ]\n}","options":{"raw":{"language":"json"}}}
+          },
+          "response": [{"name":"200","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"message\": \"Delivery settings updated\"\n}"}]
+        },
+        {
+          "name": "PATCH Toggle Open/Close",
+          "request": {
+            "method": "PATCH",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"},{"key":"Content-Type","value":"application/json"}],
+            "url": {"raw":"{{base_url}}/vendor/restaurants/{{restaurant_id}}/toggle-open","host":["{{base_url}}"],"path":["vendor","restaurants","{{restaurant_id}}","toggle-open"]},
+            "body": {"mode":"raw","raw":"{\n  \"isOpen\": true\n}","options":{"raw":{"language":"json"}}}
+          },
+          "response": [{"name":"200","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"id\": \"rest-uuid\",\n  \"isOpen\": true\n}"}]
+        },
+        {
+          "name": "GET Restaurant Stats",
+          "request": {
+            "method": "GET",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"}],
+            "url": {"raw":"{{base_url}}/vendor/restaurants/{{restaurant_id}}/stats","host":["{{base_url}}"],"path":["vendor","restaurants","{{restaurant_id}}","stats"]}
+          },
+          "response": [{"name":"200","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"totalOrders\": 350,\n  \"totalEarnings\": 25000.0,\n  \"walletBalance\": 5000.0,\n  \"rating\": 4.5,\n  \"ratingCount\": 120,\n  \"todayOrders\": 12,\n  \"todayEarnings\": 1500.0\n}"}]
+        }
+      ]
+    },
+    {
+      "name": "Vendor — Menu",
+      "item": [
+        {
+          "name": "POST Create MenuSection",
+          "event": [{"listen":"test","script":{"type":"text/javascript","exec":["var r=pm.response.json(); if(r.id) pm.collectionVariables.set('section_id',r.id);"]}}],
+          "request": {
+            "method": "POST",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"},{"key":"Content-Type","value":"application/json"}],
+            "url": {"raw":"{{base_url}}/vendor/menu-sections","host":["{{base_url}}"],"path":["vendor","menu-sections"]},
+            "body": {"mode":"raw","raw":"{\n  \"restaurantId\": \"{{restaurant_id}}\",\n  \"name\": \"Main Dishes\",\n  \"nameAr\": \"الأطباق الرئيسية\",\n  \"sortOrder\": 1\n}","options":{"raw":{"language":"json"}}}
+          },
+          "response": [{"name":"201","status":"Created","code":201,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"id\": \"sec-uuid\",\n  \"restaurantId\": \"rest-uuid\",\n  \"name\": \"Main Dishes\",\n  \"nameAr\": \"الأطباق الرئيسية\",\n  \"isActive\": true,\n  \"sortOrder\": 1\n}"}]
+        },
+        {
+          "name": "PATCH Update MenuSection",
+          "request": {
+            "method": "PATCH",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"},{"key":"Content-Type","value":"application/json"}],
+            "url": {"raw":"{{base_url}}/vendor/menu-sections/{{section_id}}","host":["{{base_url}}"],"path":["vendor","menu-sections","{{section_id}}"]},
+            "body": {"mode":"raw","raw":"{\n  \"name\": \"Appetizers\",\n  \"nameAr\": \"مقبلات\",\n  \"sortOrder\": 2\n}","options":{"raw":{"language":"json"}}}
+          },
+          "response": [{"name":"200","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"id\": \"sec-uuid\",\n  \"name\": \"Appetizers\"\n}"}]
+        },
+        {
+          "name": "DELETE MenuSection",
+          "request": {
+            "method": "DELETE",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"}],
+            "url": {"raw":"{{base_url}}/vendor/menu-sections/{{section_id}}","host":["{{base_url}}"],"path":["vendor","menu-sections","{{section_id}}"]}
+          },
+          "response": [{"name":"200","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"message\": \"Section deleted\"\n}"}]
+        },
+        {
+          "name": "POST Create FoodItem",
+          "event": [{"listen":"test","script":{"type":"text/javascript","exec":["var r=pm.response.json(); if(r.id) pm.collectionVariables.set('food_item_id',r.id);"]}}],
+          "request": {
+            "method": "POST",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"},{"key":"Content-Type","value":"application/json"}],
+            "url": {"raw":"{{base_url}}/vendor/food-items","host":["{{base_url}}"],"path":["vendor","food-items"]},
+            "body": {"mode":"raw","raw":"{\n  \"sectionId\": \"{{section_id}}\",\n  \"name\": \"Grilled Chicken\",\n  \"description\": \"Fresh grilled chicken with herbs\",\n  \"imageUrl\": \"https://s3.example.com/chicken.jpg\",\n  \"price\": 89.99,\n  \"originalPrice\": 110.0,\n  \"isOnSale\": true,\n  \"prepTimeMin\": 20,\n  \"allergens\": [\"gluten\"],\n  \"addons\": [\n    {\"name\": \"Extra sauce\", \"price\": 5.0},\n    {\"name\": \"Extra rice\", \"price\": 10.0}\n  ]\n}","options":{"raw":{"language":"json"}}}
+          },
+          "response": [{"name":"201","status":"Created","code":201,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"id\": \"food-uuid\",\n  \"sectionId\": \"sec-uuid\",\n  \"name\": \"Grilled Chicken\",\n  \"price\": 89.99,\n  \"originalPrice\": 110.0,\n  \"isOnSale\": true,\n  \"isAvailable\": true,\n  \"prepTimeMin\": 20,\n  \"allergens\": [\"gluten\"],\n  \"addons\": [{\"name\":\"Extra sauce\",\"price\":5.0}],\n  \"createdAt\": \"2025-01-01T00:00:00.000Z\"\n}"}]
+        },
+        {
+          "name": "PATCH Update FoodItem",
+          "request": {
+            "method": "PATCH",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"},{"key":"Content-Type","value":"application/json"}],
+            "url": {"raw":"{{base_url}}/vendor/food-items/{{food_item_id}}","host":["{{base_url}}"],"path":["vendor","food-items","{{food_item_id}}"]},
+            "body": {"mode":"raw","raw":"{\n  \"price\": 79.99,\n  \"description\": \"Updated description\"\n}","options":{"raw":{"language":"json"}}}
+          },
+          "response": [{"name":"200","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"id\": \"food-uuid\",\n  \"price\": 79.99,\n  \"updatedAt\": \"2025-01-02T00:00:00.000Z\"\n}"}]
+        },
+        {
+          "name": "DELETE FoodItem",
+          "request": {
+            "method": "DELETE",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"}],
+            "url": {"raw":"{{base_url}}/vendor/food-items/{{food_item_id}}","host":["{{base_url}}"],"path":["vendor","food-items","{{food_item_id}}"]}
+          },
+          "response": [{"name":"200","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"message\": \"Food item deleted\"\n}"}]
+        },
+        {
+          "name": "PATCH Toggle FoodItem Availability",
+          "request": {
+            "method": "PATCH",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"},{"key":"Content-Type","value":"application/json"}],
+            "url": {"raw":"{{base_url}}/vendor/food-items/{{food_item_id}}/availability","host":["{{base_url}}"],"path":["vendor","food-items","{{food_item_id}}","availability"]},
+            "body": {"mode":"raw","raw":"{\n  \"isAvailable\": false\n}","options":{"raw":{"language":"json"}}}
+          },
+          "response": [{"name":"200","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"id\": \"food-uuid\",\n  \"isAvailable\": false\n}"}]
+        }
+      ]
+    },
+    {
+      "name": "Cart",
+      "item": [
+        {
+          "name": "GET Cart",
+          "request": {
+            "method": "GET",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"}],
+            "url": {"raw":"{{base_url}}/cart","host":["{{base_url}}"],"path":["cart"]}
+          },
+          "response": [{"name":"200","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"id\": \"cart-uuid\",\n  \"customerId\": \"user-uuid\",\n  \"restaurantId\": \"rest-uuid\",\n  \"items\": [\n    {\n      \"id\": \"ci-uuid\",\n      \"foodItemId\": \"food-uuid\",\n      \"foodItem\": {\"name\": \"Grilled Chicken\", \"price\": 89.99, \"imageUrl\": null},\n      \"quantity\": 2,\n      \"unitPrice\": 89.99,\n      \"selectedAddons\": [{\"name\":\"Extra sauce\",\"price\":5}],\n      \"specialNote\": \"No spicy\",\n      \"addedAt\": \"2025-01-01T00:00:00.000Z\"\n    }\n  ],\n  \"subtotal\": 189.98\n}"}]
+        },
+        {
+          "name": "POST Add Cart Item",
+          "event": [{"listen":"test","script":{"type":"text/javascript","exec":["var r=pm.response.json(); if(r.id) pm.collectionVariables.set('cart_item_id',r.id);"]}}],
+          "request": {
+            "method": "POST",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"},{"key":"Content-Type","value":"application/json"}],
+            "url": {"raw":"{{base_url}}/cart/items","host":["{{base_url}}"],"path":["cart","items"]},
+            "body": {"mode":"raw","raw":"{\n  \"foodItemId\": \"{{food_item_id}}\",\n  \"quantity\": 2,\n  \"selectedAddons\": [{\"name\": \"Extra sauce\", \"price\": 5.0}],\n  \"specialNote\": \"No spicy please\"\n}","options":{"raw":{"language":"json"}}}
+          },
+          "response": [
+            {"name":"201","status":"Created","code":201,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"id\": \"ci-uuid\",\n  \"cartId\": \"cart-uuid\",\n  \"foodItemId\": \"food-uuid\",\n  \"quantity\": 2,\n  \"unitPrice\": 89.99,\n  \"selectedAddons\": [{\"name\":\"Extra sauce\",\"price\":5}],\n  \"specialNote\": \"No spicy please\"\n}"},
+            {"name":"409 Different Restaurant","status":"Conflict","code":409,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"statusCode\": 409,\n  \"error\": \"Conflict\",\n  \"message\": \"Cart contains items from a different restaurant. Clear cart first.\"\n}"}
+          ]
+        },
+        {
+          "name": "PATCH Update Cart Item",
+          "request": {
+            "method": "PATCH",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"},{"key":"Content-Type","value":"application/json"}],
+            "url": {"raw":"{{base_url}}/cart/items/{{cart_item_id}}","host":["{{base_url}}"],"path":["cart","items","{{cart_item_id}}"]},
+            "body": {"mode":"raw","raw":"{\n  \"quantity\": 3,\n  \"selectedAddons\": [{\"name\": \"Extra rice\", \"price\": 10.0}]\n}","options":{"raw":{"language":"json"}}}
+          },
+          "response": [{"name":"200","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"id\": \"ci-uuid\",\n  \"quantity\": 3\n}"}]
+        },
+        {
+          "name": "DELETE Cart Item",
+          "request": {
+            "method": "DELETE",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"}],
+            "url": {"raw":"{{base_url}}/cart/items/{{cart_item_id}}","host":["{{base_url}}"],"path":["cart","items","{{cart_item_id}}"]}
+          },
+          "response": [{"name":"200","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"message\": \"Item removed from cart\"\n}"}]
+        },
+        {
+          "name": "DELETE Clear Cart",
+          "request": {
+            "method": "DELETE",
+            "header": [{"key":"Authorization","value":"Bearer {{access_token}}"}],
+            "url": {"raw":"{{base_url}}/cart","host":["{{base_url}}"],"path":["cart"]}
+          },
+          "response": [{"name":"200","status":"OK","code":200,"header":[{"key":"Content-Type","value":"application/json"}],"body":"{\n  \"message\": \"Cart cleared\"\n}"}]
+        }
+      ]
+    }
+  ]
+}

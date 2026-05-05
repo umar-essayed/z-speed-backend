@@ -335,7 +335,15 @@ export class OrdersService {
         orderBy: { createdAt: 'desc' },
         include: { 
           items: { include: { foodItem: true } },
-          customer: true
+          customer: true,
+          driver: { include: { user: { select: { name: true, phone: true } } } },
+          deliveryRequests: {
+            include: {
+              driver: {
+                include: { user: { select: { name: true, phone: true, profileImage: true } } }
+              }
+            }
+          }
         },
       }),
       this.prisma.order.count({ where }),
@@ -505,23 +513,24 @@ export class OrdersService {
     // Create delivery requests
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 min expiration
     await Promise.all(
-      drivers.map((driver) =>
+      drivers.map(({ driver, distance }) =>
         this.prisma.deliveryRequest.create({
           data: {
             orderId,
             driverId: driver.id,
             expiresAt,
             deliveryFee: order.deliveryFee,
+            estimatedDistance: distance,
           },
         }),
       ),
     );
 
     // Notify drivers
-    const driverUserIds = drivers.map((d) => d.userId);
+    const driverUserIds = drivers.map(({ driver }) => driver.userId);
     await this.notifications.notifyAvailableDrivers(driverUserIds, orderId);
     
-    for (const driver of drivers) {
+    for (const { driver } of drivers) {
       this.gateway.emitToDriver(driver.id, 'order:new_request', {
         orderId,
         expiresAt,

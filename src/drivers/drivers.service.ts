@@ -381,13 +381,13 @@ export class DriversService {
 
       const totalScore = distanceScore + ratingScore + acceptanceScore + vehicleScore;
       
-      return { driver, totalScore };
+      return { driver, totalScore, distance };
     });
 
     // Sort by score DESC
     scoredDrivers.sort((a, b) => b.totalScore - a.totalScore);
 
-    return scoredDrivers.map(sd => sd.driver).slice(0, 10);
+    return scoredDrivers.map(sd => ({ driver: sd.driver, distance: sd.distance })).slice(0, 10);
   }
 
   // =============================================

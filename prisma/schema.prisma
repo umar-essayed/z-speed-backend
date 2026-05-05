@@ -91,7 +91,6 @@ model User {
 
   // ── Supabase Auth (Primary) ──────────────────────────
   supabaseId    String? @unique // Supabase auth.users.id (primary identity)
-  firebaseUid   String? @unique // Firebase UID for legacy sync
   supertokensId String? @unique // @deprecated — legacy SuperTokens ID, kept for migration
   authProvider  String  @default("email") // email | google | apple | phone
 
@@ -232,7 +231,6 @@ model Vehicle {
 
 model Restaurant {
   id      String @id @default(uuid())
-  firebaseId String? @unique // Firebase document ID for legacy sync
   ownerId String
   owner   User   @relation("RestaurantOwner", fields: [ownerId], references: [id], onDelete: Cascade)
 
@@ -368,7 +366,6 @@ model MenuSection {
 
 model FoodItem {
   id        String      @id @default(uuid())
-  firebaseId String?    @unique // Firebase document ID for legacy sync
   sectionId String
   section   MenuSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
 
@@ -431,7 +428,6 @@ model CartItem {
 
 model Order {
   id String @id @default(uuid())
-  firebaseOrderId String? @unique // Firebase document ID for legacy sync
 
   customerId String
   customer   User   @relation("CustomerOrders", fields: [customerId], references: [id])

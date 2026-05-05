@@ -18,7 +18,8 @@ import { DisputesService } from '../disputes/disputes.service';
 import { PaymentsService } from '../payments/payments.service';
 import { DriversService } from '../drivers/drivers.service';
 import { SignatureUtil } from '../wallet/signature.util';
-import { FirebaseSyncService } from '../firebase/firebase-sync.service';
+import { FirebaseSyncService } from './firebase-sync.service';
+import { forwardRef, Inject } from '@nestjs/common';
 
 @Injectable()
 export class OrdersService {
@@ -34,6 +35,7 @@ export class OrdersService {
     private readonly disputesService: DisputesService,
     private readonly paymentsService: PaymentsService,
     private readonly driversService: DriversService,
+    @Inject(forwardRef(() => FirebaseSyncService))
     private readonly firebaseSync: FirebaseSyncService,
   ) {}
 
@@ -396,14 +398,14 @@ export class OrdersService {
     this.gateway.emitToCustomer(updated.customerId, 'order:status_changed', updated);
     this.gateway.emitToOrder(orderId, 'status_changed', { status: dto.status });
 
+    // Side effect: Sync status back to Firebase for mobile app visibility
+    this.firebaseSync.updateFirebaseOrderStatus(orderId, dto.status).catch(err => 
+      this.logger.error(`Failed to sync status to Firebase for order ${orderId}`, err.stack)
+    );
+
     // Side effects: DELIVERED → add earnings
     if (dto.status === OrderStatus.DELIVERED) {
       await this.handleDelivered(updated);
-    }
-
-    // Sync back to Firebase if it's a legacy order
-    if (order.firebaseOrderId) {
-      await this.firebaseSync.syncStatusToFirebase(order.firebaseOrderId, dto.status);
     }
 
     return updated;
@@ -431,11 +433,6 @@ export class OrdersService {
       where: { id: orderId },
       data: { status: OrderStatus.CANCELLED },
     });
-
-    // Sync back to Firebase if it's a legacy order
-    if (order.firebaseOrderId) {
-      await this.firebaseSync.syncStatusToFirebase(order.firebaseOrderId, OrderStatus.CANCELLED);
-    }
 
     // If already paid, initiate refund
     if (order.paymentState === PaymentState.PAID) {

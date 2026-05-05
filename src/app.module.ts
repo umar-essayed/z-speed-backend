@@ -57,6 +57,7 @@ import { FirebaseModule } from './firebase/firebase.module';
     // Core
     PrismaModule,
     SupabaseModule,
+    FirebaseModule,
 
     // Feature Modules
     AuthModule,
@@ -84,7 +85,6 @@ import { FirebaseModule } from './firebase/firebase.module';
     RedisModule,
     FavoritesModule,
     OnboardingModule,
-    FirebaseModule,
   ],
   providers: [
     {

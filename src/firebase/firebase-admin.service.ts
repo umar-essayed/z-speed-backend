@@ -1,56 +1,50 @@
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import * as admin from 'firebase-admin';
-import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import * as path from 'path';
+import * as fs from 'fs';
 
 @Injectable()
 export class FirebaseAdminService implements OnModuleInit {
   private readonly logger = new Logger(FirebaseAdminService.name);
-  private firebaseApp: admin.app.App;
-
-  constructor(private readonly configService: ConfigService) {}
+  private firestore: admin.firestore.Firestore;
 
   onModuleInit() {
     try {
-      const serviceAccountVar = this.configService.get<string>('FIREBASE_SERVICE_ACCOUNT');
-      this.logger.log(`🔍 Checking FIREBASE_SERVICE_ACCOUNT... Found: ${!!serviceAccountVar}`);
-      
-      let credential;
+      // Look for FIREBASE-KEY.json in the project root or desktop
+      const keyPaths = [
+        path.join(process.cwd(), 'FIREBASE-KEY.json'),
+        path.join(process.cwd(), '..', 'FIREBASE-KEY.json'),
+        '/home/omar/Desktop/Z-SPEED/FIREBASE-KEY.json',
+      ];
 
-      if (serviceAccountVar) {
-        this.logger.log(`🔐 Initializing Firebase Admin via Environment Variable (Length: ${serviceAccountVar.length} chars)`);
-        // Parse the JSON string from env var
-        const serviceAccount = JSON.parse(serviceAccountVar);
-        
-        // CRITICAL: Ensure private_key has correct newline formatting
-        if (serviceAccount.private_key) {
-          serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+      let serviceAccount = null;
+      for (const keyPath of keyPaths) {
+        if (fs.existsSync(keyPath)) {
+          serviceAccount = require(keyPath);
+          this.logger.log(`Found Firebase key at ${keyPath}`);
+          break;
         }
-        
-        credential = admin.credential.cert(serviceAccount);
-      } else {
-        this.logger.warn('⚠️ FIREBASE_SERVICE_ACCOUNT not found in env, falling back to local file...');
-        const serviceAccountPath = '/home/omar/Desktop/Z-SPEED/FIREBASE-KEY.json';
-        credential = admin.credential.cert(serviceAccountPath);
+      }
+
+      if (!serviceAccount) {
+        this.logger.warn('FIREBASE-KEY.json not found! Firebase Sync will be disabled.');
+        return;
       }
 
       if (!admin.apps.length) {
-        this.firebaseApp = admin.initializeApp({
-          credential,
+        admin.initializeApp({
+          credential: admin.credential.cert(serviceAccount),
         });
-        this.logger.log('🔥 Firebase Admin Initialized successfully');
-      } else {
-        this.firebaseApp = admin.app();
       }
+
+      this.firestore = admin.firestore();
+      this.logger.log('Firebase Admin SDK initialized successfully.');
     } catch (error) {
-      this.logger.error('❌ Failed to initialize Firebase Admin:', error.message);
+      this.logger.error('Failed to initialize Firebase Admin SDK', error.stack);
     }
   }
 
   getFirestore() {
-    return admin.firestore();
-  }
-
-  getAuth() {
-    return admin.auth();
+    return this.firestore;
   }
 }

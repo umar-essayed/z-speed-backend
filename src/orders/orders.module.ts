@@ -9,6 +9,7 @@ import { LoyaltyModule } from '../loyalty/loyalty.module';
 import { DisputesModule } from '../disputes/disputes.module';
 import { DriversModule } from '../drivers/drivers.module';
 import { PaymentsModule } from '../payments/payments.module';
+import { FirebaseSyncService } from './firebase-sync.service';
 
 @Module({
   imports: [
@@ -21,7 +22,7 @@ import { PaymentsModule } from '../payments/payments.module';
     PaymentsModule,
   ],
   controllers: [OrdersController, VendorOrdersController],
-  providers: [OrdersService, OrderStateMachineService],
-  exports: [OrdersService, OrderStateMachineService],
+  providers: [OrdersService, OrderStateMachineService, FirebaseSyncService],
+  exports: [OrdersService, OrderStateMachineService, FirebaseSyncService],
 })
 export class OrdersModule {}

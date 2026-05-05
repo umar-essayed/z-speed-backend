@@ -21,14 +21,28 @@ async function bootstrap() {
 
   // CORS
   app.enableCors({
-    origin: allowedOrigins ? allowedOrigins.split(',') : '*',
+    origin: (origin, callback) => {
+      if (!allowedOrigins || allowedOrigins === '*') {
+        callback(null, true);
+        return;
+      }
+      const origins = allowedOrigins.split(',').map((o) => o.trim().replace(/\/$/, ''));
+      if (!origin || origins.includes(origin.replace(/\/$/, ''))) {
+        callback(null, true);
+      } else {
+        // Fallback for subdomains if needed, but for now strict match
+        callback(null, false);
+      }
+    },
     allowedHeaders: [
-      'content-type', 
-      'authorization', 
-      'idempotency-key', 
-      'mfa-token', 
-      'app-integrity'
+      'content-type',
+      'authorization',
+      'idempotency-key',
+      'mfa-token',
+      'app-integrity',
+      'x-requested-with',
     ],
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
   });
 

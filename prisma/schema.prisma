@@ -97,6 +97,7 @@ model User {
   email    String  @unique
   googleId String? @unique // Google OAuth provider ID
   appleId  String? @unique // Apple Sign-In provider ID
+  firebaseUid String? @unique // Firebase Auth UID
 
   name   String
   phone  String?       @unique
@@ -240,6 +241,7 @@ model Restaurant {
   descriptionAr String?
   logoUrl       String?
   coverImageUrl String?
+  firebaseId    String? @unique // Firebase document ID
 
   isActive   Boolean       @default(true)
   isOpen     Boolean       @default(false)
@@ -374,6 +376,7 @@ model FoodItem {
   description          String?
   descriptionAr        String?
   imageUrl             String?
+  firebaseId           String? @unique // Firebase document ID
   price                Float
   originalPrice        Float?
   isOnSale             Boolean @default(false)
@@ -439,6 +442,7 @@ model Order {
   driver   DriverProfile? @relation("DriverOrders", fields: [driverId], references: [id])
 
   status OrderStatus @default(PENDING)
+  firebaseOrderId String? @unique // Firebase Realtime DB / Firestore Order ID
 
   // Pricing & Financials
   subtotal    Float

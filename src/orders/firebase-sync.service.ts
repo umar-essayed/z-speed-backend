@@ -34,12 +34,16 @@ export class FirebaseSyncService implements OnModuleInit {
     this.logger.log('Started listening to Firebase orders collection...');
 
     // Listen for new or updated orders in Firebase
+    // Note: We cannot use where('syncedToPostgres', '!=', true) because Firestore excludes docs where the field doesn't exist
     firestore.collection('orders')
-      .where('syncedToPostgres', '!=', true)
+      .where('status', '==', 'pending')
       .onSnapshot(async (snapshot) => {
         for (const change of snapshot.docChanges()) {
-          if (change.type === 'added') {
-            await this.syncOrder(change.doc);
+          if (change.type === 'added' || change.type === 'modified') {
+            const data = change.doc.data();
+            if (data.syncedToPostgres !== true) {
+              await this.syncOrder(change.doc);
+            }
           }
         }
       }, (error) => {

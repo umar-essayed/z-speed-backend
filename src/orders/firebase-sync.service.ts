@@ -68,6 +68,28 @@ export class FirebaseSyncService implements OnModuleInit {
             where: { supabaseId: data.customerId }
           });
         }
+        
+        // If user still not found, try to fetch from Firebase Auth and create in Postgres
+        if (!user) {
+          try {
+            const authUser = await this.firebaseAdmin.getAuth().getUser(data.customerId);
+            if (authUser) {
+              user = await this.prisma.user.create({
+                data: {
+                  firebaseUid: authUser.uid,
+                  email: authUser.email || `${authUser.uid}@temp.zspeed.com`,
+                  name: authUser.displayName || data.customerName || 'Z-SPEED App User',
+                  phone: authUser.phoneNumber || null,
+                  role: 'CUSTOMER',
+                }
+              });
+              this.logger.log(`Created missing user in Postgres: ${user.id} from Firebase Auth`);
+            }
+          } catch (err) {
+            this.logger.warn(`Could not fetch user from Firebase Auth: ${err.message}`);
+          }
+        }
+
         if (user) customerId = user.id;
       }
 
@@ -152,28 +174,35 @@ export class FirebaseSyncService implements OnModuleInit {
     if (!firestore) return;
 
     try {
-      const snapshot = await firestore.collection('orders')
-        .where('postgresOrderId', '==', postgresOrderId)
-        .limit(1)
-        .get();
+      // Find the order in Postgres to get the firebaseOrderId
+      const order = await this.prisma.order.findUnique({
+        where: { id: postgresOrderId },
+        select: { firebaseOrderId: true }
+      });
 
-      if (!snapshot.empty) {
-        const doc = snapshot.docs[0];
-        
-        // Map Postgres status to Firebase status
-        let firebaseStatus = 'pending';
-        switch(newStatus) {
-          case OrderStatus.CONFIRMED: firebaseStatus = 'accepted'; break;
-          case OrderStatus.PREPARING: firebaseStatus = 'preparing'; break;
-          case OrderStatus.READY: firebaseStatus = 'ready'; break;
-          case OrderStatus.OUT_FOR_DELIVERY: firebaseStatus = 'on_the_way'; break;
-          case OrderStatus.DELIVERED: firebaseStatus = 'delivered'; break;
-          case OrderStatus.CANCELLED: firebaseStatus = 'cancelled'; break;
-        }
-
-        await doc.ref.update({ status: firebaseStatus, updatedAt: new Date() });
-        this.logger.log(`Synced status ${newStatus} back to Firebase order ${doc.id}`);
+      if (!order || !order.firebaseOrderId) {
+        this.logger.warn(`Cannot sync status to Firebase: Postgres Order ${postgresOrderId} has no firebaseOrderId`);
+        return;
       }
+
+      // Map Postgres status to Firebase status
+      let firebaseStatus = 'pending';
+      switch(newStatus) {
+        case OrderStatus.CONFIRMED: firebaseStatus = 'accepted'; break;
+        case OrderStatus.PREPARING: firebaseStatus = 'preparing'; break;
+        case OrderStatus.READY: firebaseStatus = 'ready'; break;
+        case OrderStatus.OUT_FOR_DELIVERY: firebaseStatus = 'on_the_way'; break;
+        case OrderStatus.DELIVERED: firebaseStatus = 'delivered'; break;
+        case OrderStatus.CANCELLED: firebaseStatus = 'cancelled'; break;
+      }
+
+      // Update directly using the document ID
+      await firestore.collection('orders').doc(order.firebaseOrderId).update({ 
+        status: firebaseStatus, 
+        updatedAt: new Date() 
+      });
+      
+      this.logger.log(`Synced status ${newStatus} (${firebaseStatus}) back to Firebase order ${order.firebaseOrderId}`);
     } catch (error) {
       this.logger.error(`Failed to sync status to Firebase for Postgres Order ${postgresOrderId}:`, error);
     }

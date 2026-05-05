@@ -18,6 +18,12 @@ export class FirebaseAdminService implements OnModuleInit {
         this.logger.log('🔐 Initializing Firebase Admin via Environment Variable');
         // Parse the JSON string from env var
         const serviceAccount = JSON.parse(serviceAccountVar);
+        
+        // CRITICAL: Ensure private_key has correct newline formatting
+        if (serviceAccount.private_key) {
+          serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+        }
+        
         credential = admin.credential.cert(serviceAccount);
       } else {
         this.logger.warn('⚠️ FIREBASE_SERVICE_ACCOUNT not found in env, falling back to local file...');

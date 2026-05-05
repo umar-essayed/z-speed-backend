@@ -61,7 +61,18 @@ async function interactiveSimulation() {
     }
     console.log(`🍔 Using Food Item: ${foodItem.name} (ID: ${foodItem.id})`);
 
-    // 1. Create an Order (Customer Action)
+    // 1. Calculate Fees based on Restaurant Settings
+    const deliveryFee = restaurant.deliveryFee || 15;
+    let serviceFee = 0;
+    if (restaurant.serviceFeeType === 'fixed') {
+      serviceFee = restaurant.serviceFeeValue || 0;
+    } else {
+      serviceFee = Math.round(foodItem.price * ((restaurant.serviceFeeValue || 0) / 100) * 100) / 100;
+    }
+
+    const total = foodItem.price + deliveryFee + serviceFee;
+
+    // 1.1 Create an Order (Customer Action)
     console.log('\n🛒 Step 1: Creating a test order for your dashboard...');
     const order = await prisma.order.create({
       data: {
@@ -69,15 +80,15 @@ async function interactiveSimulation() {
         restaurantId: restaurant.id,
         status: 'PENDING',
         subtotal: foodItem.price,
-        deliveryFee: 20,
-        serviceFee: 5,
-        total: foodItem.price + 25,
-        appCommission: foodItem.price * 0.1,
-        restaurantShare: foodItem.price * 0.9,
-        driverShare: 15,
-        appShare: (foodItem.price * 0.1) + 5,
+        deliveryFee: deliveryFee,
+        serviceFee: serviceFee,
+        total: total,
+        appCommission: 0, // Restaurant gets 100% of products
+        restaurantShare: foodItem.price,
+        driverShare: deliveryFee * 0.8, // Example split for driver
+        appShare: serviceFee + (deliveryFee * 0.2), // Example split for app
         paymentMethod: 'CASH',
-        deliveryAddress: 'Cairo, Egypt (Ledger Test)',
+        deliveryAddress: 'Cairo, Egypt (Dynamic Test)',
         deliveryLat: 30.0444,
         deliveryLng: 31.2357,
         items: {
@@ -112,22 +123,30 @@ async function interactiveSimulation() {
     // 4. Finalize Delivery & Ledger
     console.log('\n🏁 Step 4: Finalizing Order and Ledger...');
     
-    const restaurantShare = 148.5;
-    const driverShare = 15;
+    // Use the calculated values from Step 1
+    const finalRestaurantShare = foodItem.price;
+    const finalDriverShare = deliveryFee * 0.8;
 
     await prisma.$transaction([
       prisma.order.update({
         where: { id: order.id },
-        data: { status: 'DELIVERED', deliveredAt: new Date(), paymentState: 'PAID' }
+        data: { 
+          status: 'DELIVERED', 
+          deliveredAt: new Date(), 
+          paymentState: 'PAID',
+          restaurantShare: finalRestaurantShare,
+          driverShare: finalDriverShare,
+          appShare: total - finalRestaurantShare - finalDriverShare
+        }
       }),
       // Vendor Update
       prisma.restaurant.update({
         where: { id: restaurant.id },
-        data: { walletBalance: { increment: restaurantShare }, totalEarnings: { increment: restaurantShare } }
+        data: { walletBalance: { increment: finalRestaurantShare }, totalEarnings: { increment: finalRestaurantShare } }
       }),
       prisma.user.update({
         where: { id: VENDOR_ID },
-        data: { walletBalance: { increment: restaurantShare } }
+        data: { walletBalance: { increment: finalRestaurantShare } }
       }),
       // Vendor Ledger Entry
       prisma.ledger.create({
@@ -135,19 +154,19 @@ async function interactiveSimulation() {
           userId: VENDOR_ID,
           orderId: order.id,
           type: 'EARNING',
-          amount: restaurantShare,
+          amount: finalRestaurantShare,
           status: 'completed',
-          signature: signLedgerEntry({ userId: VENDOR_ID, orderId: order.id, type: 'EARNING', amount: restaurantShare })
+          signature: signLedgerEntry({ userId: VENDOR_ID, orderId: order.id, type: 'EARNING', amount: finalRestaurantShare })
         }
       }),
       // Driver Update
       prisma.driverProfile.update({
         where: { id: driver.id },
-        data: { totalEarnings: { increment: driverShare }, totalTrips: { increment: 1 } }
+        data: { totalEarnings: { increment: finalDriverShare }, totalTrips: { increment: 1 } }
       }),
       prisma.user.update({
         where: { id: DRIVER_USER_ID },
-        data: { walletBalance: { increment: driverShare } }
+        data: { walletBalance: { increment: finalDriverShare } }
       }),
       // Driver Ledger Entry
       prisma.ledger.create({
@@ -155,9 +174,9 @@ async function interactiveSimulation() {
           userId: DRIVER_USER_ID,
           orderId: order.id,
           type: 'EARNING',
-          amount: driverShare,
+          amount: finalDriverShare,
           status: 'completed',
-          signature: signLedgerEntry({ userId: DRIVER_USER_ID, orderId: order.id, type: 'EARNING', amount: driverShare })
+          signature: signLedgerEntry({ userId: DRIVER_USER_ID, orderId: order.id, type: 'EARNING', amount: finalDriverShare })
         }
       })
     ]);

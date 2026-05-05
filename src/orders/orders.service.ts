@@ -278,6 +278,7 @@ export class OrdersService {
         items: { include: { foodItem: true } },
         restaurant: true,
         driver: true,
+        customer: true,
         reviews: true,
       },
     });
@@ -328,7 +329,10 @@ export class OrdersService {
         skip: (page - 1) * limit,
         take: limit,
         orderBy: { createdAt: 'desc' },
-        include: { items: { include: { foodItem: true } } },
+        include: { 
+          items: { include: { foodItem: true } },
+          customer: true
+        },
       }),
       this.prisma.order.count({ where }),
     ]);

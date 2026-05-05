@@ -1,7 +1,7 @@
 import axios from 'axios';
 import * as readline from 'readline';
 
-const API_BASE_URL = 'http://localhost:3000/api/v1';
+const API_BASE_URL = 'https://z-speed-backend-production.up.railway.app/api/v1';
 const TEST_EMAIL = 'ozex.ceo@gmail.com';
 
 const rl = readline.createInterface({
@@ -36,7 +36,7 @@ async function simulate() {
         code: code,
       });
       console.log('✅ Verification Status:', verifyRes.data.message);
-      
+
       if (verifyRes.data.user) {
         console.log('👤 User details:', verifyRes.data.user);
       }

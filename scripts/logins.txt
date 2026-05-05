@@ -1,0 +1,18 @@
+RESTAURANT LOGINS (FINAL CLEAN LIST)
+====================================
+
+1. cook door
+   Email: vendor_5rksmbyesvsbgbtcjkmo@zspeed.app
+   Password: ZSpeed@wtmn00jg
+
+2. Z MARKET (Supermarket)
+   Email: Info@mostafasolimangroup.com
+   Password: ZSpeed@j8ocq9aa
+
+3. Bulika (Oriental Restaurant)
+   Email: hassan@mostafasolimangroup.com
+   Password: ZSpeed@cbixftbp
+
+-----------------
+Note: Use these credentials to log in to the Restaurant Dashboard.
+All menu items and images have been migrated successfully.

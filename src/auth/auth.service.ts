@@ -474,11 +474,11 @@ export class AuthService {
     // Generate and cache code via OtpService
     const code = await this.otpService.sendOtp(email);
 
-    // In dev mode skip real email sending (no SMTP / templates configured)
-    if (this.configService.get<string>('NODE_ENV') === 'development') {
-      this.logger.warn(`[DEV MODE] Email OTP for ${email}: ${code} (use 123456 as master code)`);
-    } else {
+    // Send real email if SMTP is configured, otherwise log to console in dev
+    if (this.configService.get('MAIL_HOST')) {
       await this.mailerService.sendOtpEmail(email, code);
+    } else if (this.configService.get<string>('NODE_ENV') === 'development') {
+      this.logger.warn(`[DEV MODE] Email OTP for ${email}: ${code} (use 123456 as master code)`);
     }
 
     return { message: 'تم إرسال رمز التحقق إلى البريد الإلكتروني' };

@@ -55,22 +55,42 @@ export class FirebaseSyncService implements OnModuleInit {
       // 1. Resolve Customer
       let customerId = this.DEFAULT_CUSTOMER_ID;
       if (data.customerId) {
-        const user = await this.prisma.user.findFirst({
-          where: { supabaseId: data.customerId }
+        let user = await this.prisma.user.findFirst({
+          where: { firebaseUid: data.customerId }
         });
+        // Fallback to supabaseId just in case
+        if (!user) {
+          user = await this.prisma.user.findFirst({
+            where: { supabaseId: data.customerId }
+          });
+        }
         if (user) customerId = user.id;
       }
 
       // 2. Resolve Restaurant
       let restaurantId = this.DEFAULT_RESTAURANT_ID;
-      // Ideally, map data.restaurantId from Firebase to Postgres
+      if (data.restaurantId) {
+        const restaurant = await this.prisma.restaurant.findFirst({
+          where: { firebaseId: data.restaurantId }
+        });
+        if (restaurant) restaurantId = restaurant.id;
+      }
 
       // 3. Resolve Items
       const itemsToCreate = [];
       if (data.items && Array.isArray(data.items)) {
         for (const item of data.items) {
+          let foodItemId = this.DEFAULT_FOOD_ITEM_ID;
+          if (item.menuItemId || item.id) {
+            const fbId = item.menuItemId || item.id;
+            const dbItem = await this.prisma.foodItem.findFirst({
+              where: { firebaseId: fbId }
+            });
+            if (dbItem) foodItemId = dbItem.id;
+          }
+
           itemsToCreate.push({
-            foodItem: { connect: { id: this.DEFAULT_FOOD_ITEM_ID } }, // Fallback to test burger
+            foodItem: { connect: { id: foodItemId } }, 
             quantity: item.quantity || 1,
             unitPrice: item.price || 0,
             specialNote: item.name || 'Synced Item',
@@ -83,6 +103,7 @@ export class FirebaseSyncService implements OnModuleInit {
         data: {
           customerId,
           restaurantId,
+          firebaseOrderId: doc.id,
           status: OrderStatus.PENDING,
           subtotal: data.subtotal || data.total || 0,
           deliveryFee: data.deliveryFee || 0,

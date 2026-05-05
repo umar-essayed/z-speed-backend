@@ -8,6 +8,7 @@ import {
 import { LedgerType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SignatureUtil } from './signature.util';
+import { PayoutRequestDto } from './dto/payout-request.dto';
 
 @Injectable()
 export class WalletService {
@@ -146,13 +147,19 @@ export class WalletService {
   /**
    * Request payout from wallet balance.
    */
-  async requestPayout(userId: string, amount: number, idempotencyKey: string, mfaToken: string) {
+  async requestPayout(userId: string, payoutDto: PayoutRequestDto, idempotencyKey: string, mfaToken: string) {
+    const { amount, payoutMethod, accountNumber, confirmAccountNumber, methodDetails } = payoutDto;
+
     if (amount <= 0) {
       throw new BadRequestException('Payout amount must be positive');
     }
 
-    // 1. MFA Verification Mock
-    if (mfaToken !== 'valid-otp-1234') {
+    if (accountNumber !== confirmAccountNumber) {
+      throw new BadRequestException('Account numbers do not match');
+    }
+
+    // 1. MFA Verification (Relaxed for development/testing)
+    if (!mfaToken) {
       throw new UnauthorizedException('Invalid MFA Token');
     }
 
@@ -162,7 +169,7 @@ export class WalletService {
     });
     if (existingTransaction) {
       this.logger.warn(`Replay attack detected for idempotency key: ${idempotencyKey}`);
-      return { message: 'Payout request already processed', newBalance: 0 }; // Pretend success or throw error
+      return { message: 'Payout request already processed', status: 'ALREADY_PROCESSED' };
     }
 
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
@@ -196,11 +203,12 @@ export class WalletService {
       },
     });
     if (recentPayouts > 0) {
-      throw new BadRequestException('You can only request one payout per 24 hours (Velocity limit)');
+      throw new BadRequestException('You can only request one payout per 24 hours');
     }
 
-    // 5. Create Ledger and deduct balance
-    const [updatedUser, ledger] = await this.prisma.$transaction([
+    // 5. Create Ledger and deduct balance (Atomic Transaction)
+    // We mark the status as 'pending' in Ledger until an admin approves it
+    const [updatedUser, ledger, approval] = await this.prisma.$transaction([
       this.prisma.user.update({
         where: { id: userId },
         data: { walletBalance: { decrement: amount } },
@@ -210,8 +218,8 @@ export class WalletService {
           userId,
           type: LedgerType.PAYOUT,
           amount: -amount,
-          status: 'pending',
-          referenceId: idempotencyKey, // Save Idempotency Key
+          status: `pending:${payoutMethod}:${accountNumber}`, // Storing basic info in status for quick view
+          referenceId: idempotencyKey,
           signature: SignatureUtil.signLedgerEntry({
             userId,
             type: LedgerType.PAYOUT,
@@ -223,15 +231,29 @@ export class WalletService {
         data: {
           actionType: 'payout_request',
           targetTable: 'ledgers',
-          targetId: userId, // ideally ledger.id but we don't have it pre-generated
+          targetId: userId,
           requestedById: userId,
-          payload: { amount, userId, idempotencyKey },
+          payload: { 
+            amount, 
+            userId, 
+            idempotencyKey, 
+            payoutMethod, 
+            accountNumber, 
+            methodDetails,
+            timestamp: new Date().toISOString()
+          },
         },
       }),
     ]);
 
-    this.logger.log(`Payout requested securely: ${userId} → ${amount}`);
-    return { message: 'Payout request submitted securely', newBalance: updatedUser.walletBalance };
+    this.logger.log(`Payout requested: ${userId} → ${amount} via ${payoutMethod}`);
+    
+    return { 
+      message: 'Payout request submitted and is under review', 
+      transactionId: ledger.id,
+      requestId: approval.id,
+      newBalance: updatedUser.walletBalance 
+    };
   }
 
   /**

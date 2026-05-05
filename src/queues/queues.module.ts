@@ -18,7 +18,7 @@ import { MailerModule } from '../mailer/mailer.module';
         if (url) {
           return {
             redis: {
-              port: parseInt(url.split(':').pop().split('/')[0]), // Extract port from URL if needed, but Bull handles URL better if passed directly
+              port: parseInt(url.split(':').pop()?.split('/')[0] || '6379'), 
             },
             url: url,
             redisOptions: {

@@ -32,5 +32,5 @@ COPY --from=builder /app/prisma ./prisma
 
 EXPOSE 3000
 
-# Railway will override CMD if needed, but this is a good default
-CMD ["npx", "prisma", "db", "push", "&&", "npm", "run", "start:prod"]
+# Start the application
+CMD ["sh", "-c", "npx prisma db push && npm run start:prod"]

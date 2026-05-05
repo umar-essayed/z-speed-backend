@@ -205,6 +205,7 @@ export class FirebaseSyncService implements OnModuleInit {
       this.logger.log(`Synced status ${newStatus} (${firebaseStatus}) back to Firebase order ${order.firebaseOrderId}`);
     } catch (error) {
       this.logger.error(`Failed to sync status to Firebase for Postgres Order ${postgresOrderId}:`, error);
+      throw new Error(`Failed to sync status with Firebase: ${error.message}`);
     }
   }
 }

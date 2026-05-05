@@ -384,6 +384,11 @@ export class OrdersService {
         break;
     }
 
+    // 1. Sync status back to Firebase FIRST for mobile app visibility
+    // If this fails, the error will be thrown and the DB update will abort
+    await this.firebaseSync.updateFirebaseOrderStatus(orderId, dto.status);
+
+    // 2. Update PostgreSQL Database
     const updated = await this.prisma.order.update({
       where: { id: orderId },
       data: {
@@ -393,15 +398,10 @@ export class OrdersService {
       include: { items: true, restaurant: true },
     });
 
-    // Side effects: Notify Customer
+    // 3. Side effects: Notify Customer
     await this.notifications.notifyCustomer(updated.customerId, dto.status, orderId);
     this.gateway.emitToCustomer(updated.customerId, 'order:status_changed', updated);
     this.gateway.emitToOrder(orderId, 'status_changed', { status: dto.status });
-
-    // Side effect: Sync status back to Firebase for mobile app visibility
-    this.firebaseSync.updateFirebaseOrderStatus(orderId, dto.status).catch(err => 
-      this.logger.error(`Failed to sync status to Firebase for order ${orderId}`, err.stack)
-    );
 
     // Side effects: DELIVERED → add earnings
     if (dto.status === OrderStatus.DELIVERED) {

@@ -12,10 +12,12 @@ export class FirebaseAdminService implements OnModuleInit {
   onModuleInit() {
     try {
       const serviceAccountVar = this.configService.get<string>('FIREBASE_SERVICE_ACCOUNT');
+      this.logger.log(`🔍 Checking FIREBASE_SERVICE_ACCOUNT... Found: ${!!serviceAccountVar}`);
+      
       let credential;
 
       if (serviceAccountVar) {
-        this.logger.log('🔐 Initializing Firebase Admin via Environment Variable');
+        this.logger.log(`🔐 Initializing Firebase Admin via Environment Variable (Length: ${serviceAccountVar.length} chars)`);
         // Parse the JSON string from env var
         const serviceAccount = JSON.parse(serviceAccountVar);
         

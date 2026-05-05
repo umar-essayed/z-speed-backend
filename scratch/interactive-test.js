@@ -36,6 +36,31 @@ async function interactiveSimulation() {
     const restaurant = vendor.ownedRestaurants[0];
     console.log(`📍 Using Restaurant: ${restaurant.name} (ID: ${restaurant.id})`);
 
+    // 0.5 Ensure restaurant has at least one food item
+    let foodItem = await prisma.foodItem.findFirst({
+      where: { section: { restaurantId: restaurant.id } }
+    });
+
+    if (!foodItem) {
+      console.log('📝 Restaurant has no items. Creating a temporary one...');
+      let section = await prisma.menuSection.findFirst({ where: { restaurantId: restaurant.id } });
+      if (!section) {
+        section = await prisma.menuSection.create({
+          data: { restaurantId: restaurant.id, name: 'Main Dishes', sortOrder: 1 }
+        });
+      }
+      foodItem = await prisma.foodItem.create({
+        data: {
+          sectionId: section.id,
+          name: 'Test Burger',
+          price: 160,
+          isAvailable: true,
+          stockQuantity: 100
+        }
+      });
+    }
+    console.log(`🍔 Using Food Item: ${foodItem.name} (ID: ${foodItem.id})`);
+
     // 1. Create an Order (Customer Action)
     console.log('\n🛒 Step 1: Creating a test order for your dashboard...');
     const order = await prisma.order.create({
@@ -43,23 +68,23 @@ async function interactiveSimulation() {
         customerId: CUSTOMER_ID,
         restaurantId: restaurant.id,
         status: 'PENDING',
-        subtotal: 165,
+        subtotal: foodItem.price,
         deliveryFee: 20,
         serviceFee: 5,
-        total: 190,
-        appCommission: 16.5,
-        restaurantShare: 148.5,
+        total: foodItem.price + 25,
+        appCommission: foodItem.price * 0.1,
+        restaurantShare: foodItem.price * 0.9,
         driverShare: 15,
-        appShare: 26.5,
+        appShare: (foodItem.price * 0.1) + 5,
         paymentMethod: 'CASH',
         deliveryAddress: 'Cairo, Egypt (Ledger Test)',
         deliveryLat: 30.0444,
         deliveryLng: 31.2357,
         items: {
           create: [{
-            foodItemId: FOOD_ITEM_ID,
+            foodItemId: foodItem.id,
             quantity: 1,
-            unitPrice: 165
+            unitPrice: foodItem.price
           }]
         }
       }

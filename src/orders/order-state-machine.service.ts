@@ -63,6 +63,8 @@ export class OrderStateMachineService {
    * Validate and throw if the transition is not allowed.
    */
   validateTransition(from: OrderStatus, to: OrderStatus, userRole: Role) {
+    if (from === to) return; // Ignore same-state transitions
+    
     if (!this.canTransition(from, to, userRole)) {
       throw new BadRequestException(
         `Cannot transition order from ${from} to ${to} with role ${userRole}`,

@@ -218,7 +218,14 @@ export class WalletService {
           userId,
           type: LedgerType.PAYOUT,
           amount: -amount,
-          status: `pending:${payoutMethod}:${accountNumber}`, // Storing basic info in status for quick view
+          status: 'pending',
+          description: `Payout via ${payoutMethod} to ${accountNumber}`,
+          metadata: {
+            payoutMethod,
+            accountNumber,
+            confirmAccountNumber,
+            methodDetails
+          },
           referenceId: idempotencyKey,
           signature: SignatureUtil.signLedgerEntry({
             userId,

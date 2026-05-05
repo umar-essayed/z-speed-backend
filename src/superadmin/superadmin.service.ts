@@ -88,14 +88,10 @@ export class SuperadminService {
 
       case 'payout_request':
         // Already deducted — mark ledger as completed
-        const payload = approval.payload as any;
-        if (payload?.userId) {
-          await this.prisma.ledger.updateMany({
-            where: {
-              userId: payload.userId,
-              type: 'PAYOUT',
-              status: 'pending',
-            },
+        const payoutPayload = approval.payload as any;
+        if (payoutPayload?.idempotencyKey) {
+          await this.prisma.ledger.update({
+            where: { referenceId: payoutPayload.idempotencyKey },
             data: { status: 'completed' },
           });
         }
@@ -175,20 +171,18 @@ export class SuperadminService {
 
       case 'payout_request':
         // Refund wallet balance
-        const payload = approval.payload as any;
-        if (payload?.amount && payload?.userId) {
-          await this.prisma.user.update({
-            where: { id: payload.userId },
-            data: { walletBalance: { increment: payload.amount } },
-          });
-          await this.prisma.ledger.updateMany({
-            where: {
-              userId: payload.userId,
-              type: 'PAYOUT',
-              status: 'pending',
-            },
-            data: { status: 'rejected' },
-          });
+        const rejectPayload = approval.payload as any;
+        if (rejectPayload?.amount && rejectPayload?.userId && rejectPayload?.idempotencyKey) {
+          await this.prisma.$transaction([
+            this.prisma.user.update({
+              where: { id: rejectPayload.userId },
+              data: { walletBalance: { increment: rejectPayload.amount } },
+            }),
+            this.prisma.ledger.update({
+              where: { referenceId: rejectPayload.idempotencyKey },
+              data: { status: 'rejected' },
+            }),
+          ]);
         }
         break;
     }

@@ -625,6 +625,8 @@ model Ledger {
   type        LedgerType
   amount      Float
   status      String     @default("completed") // completed, pending
+  description String?
+  metadata    Json?
   signature   String?
   referenceId String?    @unique // Idempotency key for preventing replay attacks
 

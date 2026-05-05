@@ -104,14 +104,21 @@ export class OrdersService {
     // Calculate Delivery Fee based on restaurant settings
     const deliveryFee = this.calculateDeliveryFee(restaurant, distance);
 
-    // Load system config for service fee
-    const config = await this.prisma.systemConfig.findUnique({
-      where: { id: 'default' },
-    });
-    
-    // Service fee: platformFeePercent of subtotal
-    const serviceFeePercent = config?.platformFeePercent ?? 2.0;
-    const serviceFee = Math.round(subtotal * (serviceFeePercent / 100) * 100) / 100;
+    // 4.5 Calculate Service Fee based on restaurant settings
+    let serviceFee = 0;
+    const r = restaurant as any; // Cast to access new fields before type updates propagate
+    if (r.serviceFeeType === 'fixed') {
+      serviceFee = r.serviceFeeValue || 0;
+    } else if (r.serviceFeeType === 'percentage') {
+      serviceFee = Math.round(subtotal * ((r.serviceFeeValue || 0) / 100) * 100) / 100;
+    } else {
+      // Fallback to system config if not set
+      const config = await this.prisma.systemConfig.findUnique({
+        where: { id: 'default' },
+      });
+      const serviceFeePercent = config?.platformFeePercent ?? 2.0;
+      serviceFee = Math.round(subtotal * (serviceFeePercent / 100) * 100) / 100;
+    }
 
     // 5. Validate & apply promo code
     let discount = 0;
@@ -557,14 +564,12 @@ export class OrdersService {
       where: { id: 'default' },
     });
 
-    // 1. Calculate Split Logic
-    // Commission can be 10, 15, 20 etc. We divide by 100 to get percentage.
-    const commissionRate = restaurant?.commissionRate ?? 15.0; 
-    const appCommission = order.subtotal * (commissionRate / 100);
-    const restaurantShare = order.subtotal - appCommission;
+    // 1. Calculate Split Logic (New: Restaurant gets 100% of products)
+    const restaurantShare = order.subtotal;
+    const appCommission = 0; // No commission from products, only service fee
     
-    const driverShare = order.deliveryFee + order.driverBoost + order.tips;
-    const appShare = appCommission + order.serviceFee;
+    const driverShare = order.deliveryFee + (order.driverBoost || 0) + (order.tips || 0);
+    const appShare = order.serviceFee;
 
     // 2. Determine Inflow (Online vs CASH)
     const isCash = order.paymentMethod === 'CASH';

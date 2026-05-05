@@ -30,4 +30,12 @@ export class DeliverySettingsDto {
 
   @IsOptional()
   deliveryFeeFormula?: any;
+
+  @IsString()
+  @IsOptional()
+  serviceFeeType?: string;
+
+  @IsNumber()
+  @IsOptional()
+  serviceFeeValue?: number;
 }

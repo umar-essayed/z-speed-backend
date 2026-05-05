@@ -279,6 +279,8 @@ model Restaurant {
   workingHours   Json?
   documentUrls   Json?
   commissionRate Float @default(10.0)
+  serviceFeeType  String? @default("fixed") // fixed, percentage
+  serviceFeeValue Float?  @default(0.0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

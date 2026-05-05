@@ -402,6 +402,8 @@ export class RestaurantsService {
         minimumOrder: dto.minimumOrder,
         deliveryFeeTiers: dto.deliveryFeeTiers,
         deliveryFeeFormula: dto.deliveryFeeFormula,
+        serviceFeeType: dto.serviceFeeType,
+        serviceFeeValue: dto.serviceFeeValue,
       },
     });
   }

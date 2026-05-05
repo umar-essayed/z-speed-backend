@@ -18,6 +18,7 @@ import { DisputesService } from '../disputes/disputes.service';
 import { PaymentsService } from '../payments/payments.service';
 import { DriversService } from '../drivers/drivers.service';
 import { SignatureUtil } from '../wallet/signature.util';
+import { FirebaseSyncService } from '../firebase/firebase-sync.service';
 
 @Injectable()
 export class OrdersService {
@@ -33,6 +34,7 @@ export class OrdersService {
     private readonly disputesService: DisputesService,
     private readonly paymentsService: PaymentsService,
     private readonly driversService: DriversService,
+    private readonly firebaseSync: FirebaseSyncService,
   ) {}
 
   /**
@@ -399,6 +401,11 @@ export class OrdersService {
       await this.handleDelivered(updated);
     }
 
+    // Sync back to Firebase if it's a legacy order
+    if (order.firebaseOrderId) {
+      await this.firebaseSync.syncStatusToFirebase(order.firebaseOrderId, dto.status);
+    }
+
     return updated;
   }
 
@@ -424,6 +431,11 @@ export class OrdersService {
       where: { id: orderId },
       data: { status: OrderStatus.CANCELLED },
     });
+
+    // Sync back to Firebase if it's a legacy order
+    if (order.firebaseOrderId) {
+      await this.firebaseSync.syncStatusToFirebase(order.firebaseOrderId, OrderStatus.CANCELLED);
+    }
 
     // If already paid, initiate refund
     if (order.paymentState === PaymentState.PAID) {

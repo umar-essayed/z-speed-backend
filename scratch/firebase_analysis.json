@@ -1,0 +1,106 @@
+{
+  "collections": [
+    "Categories",
+    "applications",
+    "carts",
+    "cuisineTypes",
+    "deliveryRequests",
+    "driverProfiles",
+    "emailVerifications",
+    "ledger",
+    "mail",
+    "notifications",
+    "orders",
+    "paymentReconciliationJobs",
+    "rateLimits",
+    "restaurants",
+    "users",
+    "vendorSections"
+  ],
+  "sampleOrder": {
+    "id": "0qoXaY8TVSUMlwDru15F",
+    "customerId": "UlZEznsHHdOq9M82ERxxYsEgMbx1",
+    "restaurantId": "iBse6IVbrN53QikUkpqo",
+    "paymentState": "unpaid",
+    "paymentMethod": "cash",
+    "subtotal": 12,
+    "tax": 0,
+    "deliveryFee": 0,
+    "serviceFee": 0,
+    "discount": 0,
+    "total": 12,
+    "items": [
+      {
+        "id": "fc35d876-3749-5e1e-94c6-426e2f36d922",
+        "menuItemId": "fc35d876-3749-5e1e-94c6-426e2f36d922",
+        "name": "Full Polika",
+        "quantity": 1,
+        "price": 12,
+        "totalPrice": 12,
+        "optionsSummary": null
+      }
+    ],
+    "deliveryAddress": "Cairo, Egypt",
+    "deliveryLat": 29.968559865664457,
+    "deliveryLng": 31.59328256609254,
+    "customerNote": "",
+    "createdAt": {
+      "_seconds": 1778002657,
+      "_nanoseconds": 939000000
+    },
+    "updatedAt": {
+      "_seconds": 1778002657,
+      "_nanoseconds": 939000000
+    },
+    "cancelledAt": {
+      "_seconds": 1778003644,
+      "_nanoseconds": 369000000
+    },
+    "cancelReason": "timeout",
+    "status": "cancelled"
+  },
+  "orderCollectionName": "orders",
+  "sampleUser": {
+    "createdAt": {
+      "_seconds": 1777775698,
+      "_nanoseconds": 790623000
+    },
+    "walletBalance": 0,
+    "name": "manarabdelhaliem138",
+    "notificationPreferences": {
+      "applicationUpdates": true,
+      "deliveryRequests": true,
+      "newOrders": true,
+      "promotional": true,
+      "orderUpdates": true
+    },
+    "type": "customer",
+    "loyaltyPoints": 0,
+    "email": "manarabdelhaliem138@gmail.com",
+    "status": "active",
+    "savedAddresses": [
+      {
+        "address": "56 Souq Al Asr Street, Sanan Basha, Cairo, Egypt",
+        "latitude": 30.06179808380779,
+        "id": "5fa5080b-3b01-4745-bfb4-ab9c20c22c45",
+        "label": "xx",
+        "longitude": 31.229853350984953
+      },
+      {
+        "address": "El Tahrir Square, Qasr Al Doubara, Cairo, Egypt",
+        "latitude": 30.0444,
+        "id": "2d75f1e5-5e23-4d53-8b3e-3d8368de880a",
+        "label": "ااا",
+        "longitude": 31.2357
+      }
+    ],
+    "updatedAt": {
+      "_seconds": 1778003533,
+      "_nanoseconds": 599000000
+    },
+    "fcmTokens": [
+      "c5ly-OdpRrOy5xlAfuC4MX:APA91bFxBG4szalhr2x42jXBUByW93LfwvP4pTP7tjUJRz7YKodC6rZPaRWnHFBAXDtSVmTatHjPteIBdaGhav_kgp0HQ6_I7IWemt_micI71NKXu72lvVs"
+    ]
+  },
+  "userCollectionName": "users"
+}

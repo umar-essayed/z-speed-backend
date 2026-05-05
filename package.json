@@ -48,6 +48,7 @@
     "class-validator": "^0.15.1",
     "cloudinary": "^2.10.0",
     "crypto-js": "^4.2.0",
+    "firebase-admin": "^13.8.0",
     "google-auth-library": "^10.6.2",
     "handlebars": "^4.7.9",
     "helmet": "^8.1.0",

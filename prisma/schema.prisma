@@ -360,6 +360,7 @@ model MenuSection {
   nameAr       String?
   isActive     Boolean    @default(true)
   sortOrder    Int        @default(0)
+  firebaseId   String?    @unique // Firebase document ID
 
   items FoodItem[]
 

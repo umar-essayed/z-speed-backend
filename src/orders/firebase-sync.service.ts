@@ -32,9 +32,9 @@ export class FirebaseSyncService implements OnModuleInit {
       return;
     }
 
-    this.logger.log('Started listening to ALL Firebase orders for bidirectional sync...');
+    this.logger.log('Started listening to ALL Firebase orders and restaurants for bidirectional sync...');
 
-    // Listen for new or updated orders in Firebase
+    // 1. Listen for new or updated orders in Firebase
     firestore.collection('orders').onSnapshot(async (snapshot) => {
       for (const change of snapshot.docChanges()) {
         const data = change.doc.data();
@@ -52,6 +52,37 @@ export class FirebaseSyncService implements OnModuleInit {
     }, (error) => {
       this.logger.error('Error listening to Firebase orders:', error);
     });
+
+    // 2. Listen for restaurant changes in Firebase
+    firestore.collection('restaurants').onSnapshot(async (snapshot) => {
+      for (const change of snapshot.docChanges()) {
+        await this.syncRestaurant(change.doc);
+      }
+    }, (error) => {
+      this.logger.error('Error listening to Firebase restaurants:', error);
+    });
+
+    // 3. Listen for menu sections (Collection Group)
+    firestore.collectionGroup('sections').onSnapshot(async (snapshot) => {
+      for (const change of snapshot.docChanges()) {
+        await this.syncMenuSection(change.doc);
+      }
+    }, (error) => {
+      this.logger.error('Error listening to Firebase menu sections:', error);
+    });
+
+    // 4. Listen for food items (Collection Group)
+    firestore.collectionGroup('items').onSnapshot(async (snapshot) => {
+      for (const change of snapshot.docChanges()) {
+        await this.syncFoodItem(change.doc);
+      }
+    }, (error) => {
+      this.logger.error('Error listening to Firebase food items:', error);
+    });
+
+    // 5. Trigger initial sync for existing restaurants
+    this.initialSyncRestaurants();
+    this.initialSyncMenu();
   }
 
   private async syncOrder(doc: any) {
@@ -168,6 +199,229 @@ export class FirebaseSyncService implements OnModuleInit {
 
     } catch (error) {
       this.logger.error(`Failed to sync Firebase order ${doc.id}:`, error.stack);
+    }
+  }
+
+  // Sync Restaurants (Vendors) FROM Firebase TO Postgres
+  private async syncRestaurant(doc: any) {
+    const data = doc.data();
+    this.logger.log(`Syncing Firebase restaurant: ${data.name || doc.id}`);
+
+    try {
+      // 1. Resolve Owner (Vendor User)
+      let ownerId: string | null = null;
+      
+      // In many Firebase setups, there is an ownerId field. If not, we might use doc.id as ownerId if it matches UID
+      const firebaseOwnerId = data.ownerId || data.userId || doc.id; 
+
+      let user = await this.prisma.user.findFirst({
+        where: { firebaseUid: firebaseOwnerId }
+      });
+
+      if (!user) {
+        // Try fetching from Firebase Auth
+        try {
+          const authUser = await this.firebaseAdmin.getAuth().getUser(firebaseOwnerId);
+          if (authUser) {
+            user = await this.prisma.user.create({
+              data: {
+                firebaseUid: authUser.uid,
+                email: authUser.email || `${authUser.uid}@vendor.zspeed.com`,
+                name: authUser.displayName || data.name || 'Vendor User',
+                phone: authUser.phoneNumber || data.phone || null,
+                role: 'VENDOR',
+              }
+            });
+            this.logger.log(`Created Vendor User in Postgres: ${user.id}`);
+          }
+        } catch (err) {
+          // If not in Auth, create a skeleton user
+          user = await this.prisma.user.create({
+            data: {
+              firebaseUid: firebaseOwnerId,
+              email: `${firebaseOwnerId}@vendor.zspeed.com`,
+              name: data.name || 'Vendor User',
+              role: 'VENDOR',
+            }
+          });
+          this.logger.log(`Created Skeleton Vendor User in Postgres: ${user.id}`);
+        }
+      }
+
+      if (!user) {
+        this.logger.error(`Could not resolve owner for restaurant ${doc.id}`);
+        return;
+      }
+
+      ownerId = user.id;
+
+      // 2. Create or Update Restaurant
+      await this.prisma.restaurant.upsert({
+        where: { firebaseId: doc.id },
+        update: {
+          name: data.name || 'Synced Restaurant',
+          nameAr: data.nameAr || null,
+          description: data.description || null,
+          logoUrl: data.logoUrl || null,
+          coverImageUrl: data.coverImageUrl || null,
+          isActive: data.isActive !== undefined ? data.isActive : true,
+          isOpen: data.isOpen !== undefined ? data.isOpen : true,
+          vendorType: data.vendorType || 'restaurant',
+          // Note: Add logic for address and geolocation if needed
+        },
+        create: {
+          firebaseId: doc.id,
+          ownerId: ownerId,
+          name: data.name || 'Synced Restaurant',
+          nameAr: data.nameAr || null,
+          description: data.description || null,
+          logoUrl: data.logoUrl || null,
+          coverImageUrl: data.coverImageUrl || null,
+          isActive: data.isActive !== undefined ? data.isActive : true,
+          isOpen: data.isOpen !== undefined ? data.isOpen : true,
+          vendorType: data.vendorType || 'restaurant',
+          status: 'ACTIVE',
+        }
+      });
+
+      this.logger.log(`✅ Synced Restaurant: ${data.name || doc.id}`);
+
+    } catch (error) {
+      this.logger.error(`Error syncing restaurant ${doc.id}:`, error);
+    }
+  }
+
+  // Initial sync to catch up on all existing restaurants
+  private async initialSyncRestaurants() {
+    this.logger.log('Performing initial sync of all Firebase restaurants...');
+    const firestore = this.firebaseAdmin.getFirestore();
+    if (!firestore) return;
+
+    try {
+      const snapshot = await firestore.collection('restaurants').get();
+      for (const doc of snapshot.docs) {
+        await this.syncRestaurant(doc);
+      }
+      this.logger.log(`✅ Initial sync completed: ${snapshot.size} restaurants processed.`);
+    } catch (error) {
+      this.logger.error('Failed during initial restaurant sync:', error);
+    }
+  }
+
+  // Sync Menu Sections FROM Firebase TO Postgres
+  private async syncMenuSection(doc: any) {
+    const data = doc.data();
+    const path = doc.ref.path; // e.g., restaurants/RES_ID/sections/SEC_ID
+    const pathParts = path.split('/');
+    const fbRestaurantId = pathParts[1];
+
+    try {
+      const restaurant = await this.prisma.restaurant.findUnique({
+        where: { firebaseId: fbRestaurantId }
+      });
+
+      if (!restaurant) {
+        this.logger.warn(`Skip sync section ${doc.id}: Restaurant ${fbRestaurantId} not found in Postgres`);
+        return;
+      }
+
+      await this.prisma.menuSection.upsert({
+        where: { firebaseId: doc.id },
+        update: {
+          name: data.name || 'Synced Section',
+          nameAr: data.nameAr || null,
+          isActive: data.isActive !== undefined ? data.isActive : true,
+          sortOrder: data.sortOrder || 0,
+        },
+        create: {
+          firebaseId: doc.id,
+          restaurantId: restaurant.id,
+          name: data.name || 'Synced Section',
+          nameAr: data.nameAr || null,
+          isActive: data.isActive !== undefined ? data.isActive : true,
+          sortOrder: data.sortOrder || 0,
+        }
+      });
+
+      this.logger.log(`✅ Synced Menu Section: ${data.name || doc.id} for Restaurant ${restaurant.name}`);
+    } catch (error) {
+      this.logger.error(`Error syncing menu section ${doc.id}:`, error);
+    }
+  }
+
+  // Sync Food Items FROM Firebase TO Postgres
+  private async syncFoodItem(doc: any) {
+    const data = doc.data();
+    const path = doc.ref.path; // e.g., restaurants/RES_ID/sections/SEC_ID/items/ITEM_ID
+    const pathParts = path.split('/');
+    const fbSectionId = pathParts[3];
+
+    try {
+      const section = await this.prisma.menuSection.findUnique({
+        where: { firebaseId: fbSectionId }
+      });
+
+      if (!section) {
+        this.logger.warn(`Skip sync item ${doc.id}: Section ${fbSectionId} not found in Postgres`);
+        return;
+      }
+
+      await this.prisma.foodItem.upsert({
+        where: { firebaseId: doc.id },
+        update: {
+          name: data.name || 'Synced Item',
+          nameAr: data.nameAr || null,
+          description: data.description || null,
+          descriptionAr: data.descriptionAr || null,
+          imageUrl: data.imageUrl || null,
+          price: data.price || data.unitPrice || 0,
+          originalPrice: data.originalPrice || null,
+          isAvailable: data.isAvailable !== undefined ? data.isAvailable : true,
+          addons: data.addonGroups || null,
+        },
+        create: {
+          firebaseId: doc.id,
+          sectionId: section.id,
+          name: data.name || 'Synced Item',
+          nameAr: data.nameAr || null,
+          description: data.description || null,
+          descriptionAr: data.descriptionAr || null,
+          imageUrl: data.imageUrl || null,
+          price: data.price || data.unitPrice || 0,
+          originalPrice: data.originalPrice || null,
+          isAvailable: data.isAvailable !== undefined ? data.isAvailable : true,
+          addons: data.addonGroups || null,
+        }
+      });
+
+      this.logger.log(`✅ Synced Food Item: ${data.name || doc.id} in Section ${section.name}`);
+    } catch (error) {
+      this.logger.error(`Error syncing food item ${doc.id}:`, error);
+    }
+  }
+
+  // Initial sync for Menu (Sections and Items)
+  private async initialSyncMenu() {
+    this.logger.log('Performing initial sync of all Firebase menu sections and items...');
+    const firestore = this.firebaseAdmin.getFirestore();
+    if (!firestore) return;
+
+    try {
+      // 1. Sync all sections
+      const sectionSnapshot = await firestore.collectionGroup('sections').get();
+      for (const doc of sectionSnapshot.docs) {
+        await this.syncMenuSection(doc);
+      }
+
+      // 2. Sync all items
+      const itemSnapshot = await firestore.collectionGroup('items').get();
+      for (const doc of itemSnapshot.docs) {
+        await this.syncFoodItem(doc);
+      }
+
+      this.logger.log(`✅ Initial menu sync completed: ${sectionSnapshot.size} sections and ${itemSnapshot.size} items processed.`);
+    } catch (error) {
+      this.logger.error('Failed during initial menu sync:', error);
     }
   }
 

@@ -3,6 +3,7 @@ import { FirebaseAdminService } from '../firebase/firebase-admin.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../gateway/realtime.gateway';
 import { OrderStatus, PaymentState } from '@prisma/client';
+import { SignatureUtil } from '../wallet/signature.util';
 
 @Injectable()
 export class FirebaseSyncService implements OnModuleInit {
@@ -31,24 +32,26 @@ export class FirebaseSyncService implements OnModuleInit {
       return;
     }
 
-    this.logger.log('Started listening to Firebase orders collection...');
+    this.logger.log('Started listening to ALL Firebase orders for bidirectional sync...');
 
     // Listen for new or updated orders in Firebase
-    // Note: We cannot use where('syncedToPostgres', '!=', true) because Firestore excludes docs where the field doesn't exist
-    firestore.collection('orders')
-      .where('status', '==', 'pending')
-      .onSnapshot(async (snapshot) => {
-        for (const change of snapshot.docChanges()) {
-          if (change.type === 'added' || change.type === 'modified') {
-            const data = change.doc.data();
-            if (data.syncedToPostgres !== true) {
-              await this.syncOrder(change.doc);
-            }
+    firestore.collection('orders').onSnapshot(async (snapshot) => {
+      for (const change of snapshot.docChanges()) {
+        const data = change.doc.data();
+        
+        if (change.type === 'added' || (change.type === 'modified' && !data.syncedToPostgres)) {
+          // New order or order that hasn't been synced yet
+          if (data.status === 'pending' && !data.syncedToPostgres) {
+            await this.syncOrder(change.doc);
           }
+        } else if (change.type === 'modified' && data.syncedToPostgres && data.postgresOrderId) {
+          // Order already exists in Postgres, sync updates from Firebase (Driver/Customer actions)
+          await this.syncStatusFromFirebase(change.doc);
         }
-      }, (error) => {
-        this.logger.error('Error listening to Firebase orders:', error);
-      });
+      }
+    }, (error) => {
+      this.logger.error('Error listening to Firebase orders:', error);
+    });
   }
 
   private async syncOrder(doc: any) {
@@ -165,6 +168,171 @@ export class FirebaseSyncService implements OnModuleInit {
 
     } catch (error) {
       this.logger.error(`Failed to sync Firebase order ${doc.id}:`, error.stack);
+    }
+  }
+
+  // Sync updates FROM Firebase TO Postgres (Driver App / Customer App actions)
+  private async syncStatusFromFirebase(doc: any) {
+    const data = doc.data();
+    const postgresOrderId = data.postgresOrderId;
+    const firebaseStatus = data.status;
+
+    try {
+      const order = await this.prisma.order.findUnique({
+        where: { id: postgresOrderId },
+        include: { restaurant: true }
+      });
+
+      if (!order) return;
+
+      const targetStatus = this.mapFirebaseToPostgresStatus(firebaseStatus);
+      
+      // 1. Sync Status if changed in Firebase
+      if (targetStatus && order.status !== targetStatus) {
+        this.logger.log(`🔄 Syncing status change FROM Firebase: ${firebaseStatus} -> ${targetStatus} for Order ${postgresOrderId}`);
+        
+        const updatedOrder = await this.prisma.order.update({
+          where: { id: postgresOrderId },
+          data: { 
+            status: targetStatus,
+            // Update timestamps if they exist in Firestore
+            ...(targetStatus === OrderStatus.OUT_FOR_DELIVERY ? { pickedUpAt: new Date() } : {}),
+            ...(targetStatus === OrderStatus.DELIVERED ? { deliveredAt: new Date() } : {}),
+          },
+          include: { restaurant: true, items: true }
+        });
+
+        // Broadcast to Vendor dashboard
+        this.gateway.emitToVendor(order.restaurantId, 'order:status_changed', updatedOrder);
+
+        // If delivered, handle earnings
+        if (targetStatus === OrderStatus.DELIVERED && order.status !== OrderStatus.DELIVERED) {
+          await this.handleOrderDeliveredInternal(updatedOrder);
+        }
+      }
+
+      // 2. Sync Driver Assignment if changed in Firebase
+      if (data.driverId && (!order.driverId || data.driverId !== order.driverId)) {
+         // Find driver by firebaseUid
+         const driver = await this.prisma.driverProfile.findFirst({
+           where: { user: { firebaseUid: data.driverId } },
+         });
+
+         if (driver && driver.id !== order.driverId) {
+           this.logger.log(`🚗 Syncing driver assignment FROM Firebase: Driver ${driver.id} for Order ${postgresOrderId}`);
+           await this.prisma.order.update({
+             where: { id: postgresOrderId },
+             data: { driverId: driver.id }
+           });
+           this.gateway.emitToVendor(order.restaurantId, 'order:driver_assigned', { orderId: postgresOrderId, driverId: driver.id });
+         }
+      }
+
+    } catch (error) {
+      this.logger.error(`Error syncing status from Firebase for doc ${doc.id}:`, error);
+    }
+  }
+
+  private mapFirebaseToPostgresStatus(firebaseStatus: string): OrderStatus | null {
+    switch(firebaseStatus) {
+      case 'pending': return OrderStatus.PENDING;
+      case 'accepted': return OrderStatus.CONFIRMED;
+      case 'preparing': return OrderStatus.PREPARING;
+      case 'ready': return OrderStatus.READY;
+      case 'on_the_way': return OrderStatus.OUT_FOR_DELIVERY;
+      case 'delivered': return OrderStatus.DELIVERED;
+      case 'cancelled': return OrderStatus.CANCELLED;
+      default: return null;
+    }
+  }
+
+  // Simplified version of OrdersService.handleDelivered to avoid circular dependency
+  private async handleOrderDeliveredInternal(order: any) {
+    this.logger.log(`💰 Processing earnings for delivered order ${order.id}`);
+    
+    try {
+      const restaurantShare = order.subtotal;
+      const driverShare = order.deliveryFee + (order.driverBoost || 0) + (order.tips || 0);
+      const appShare = order.serviceFee;
+      const isCash = order.paymentMethod === 'CASH';
+      const cashCollected = isCash ? order.total : 0;
+
+      // Update Order financials
+      await this.prisma.order.update({
+        where: { id: order.id },
+        data: {
+          appCommission: 0,
+          restaurantShare,
+          driverShare,
+          appShare,
+          cashCollected,
+        }
+      });
+
+      // Update Restaurant Earnings
+      if (order.restaurantId) {
+        await this.prisma.restaurant.update({
+          where: { id: order.restaurantId },
+          data: {
+            pendingBalance: { increment: restaurantShare },
+            totalEarnings: { increment: restaurantShare },
+          },
+        });
+
+        // Ledger for restaurant owner
+        if (order.restaurant.ownerId) {
+          await this.prisma.ledger.create({
+            data: {
+              userId: order.restaurant.ownerId,
+              orderId: order.id,
+              type: 'EARNING',
+              amount: restaurantShare,
+              status: 'pending',
+              signature: SignatureUtil.signLedgerEntry({
+                userId: order.restaurant.ownerId,
+                orderId: order.id,
+                type: 'EARNING',
+                amount: restaurantShare,
+              }),
+            },
+          });
+        }
+      }
+
+      // Update Driver Earnings & Debt
+      if (order.driverId) {
+        const driver = await this.prisma.driverProfile.findUnique({ where: { id: order.driverId } });
+        if (driver) {
+          const debtIncrease = isCash ? (cashCollected - driverShare) : 0;
+          await this.prisma.driverProfile.update({
+            where: { id: order.driverId },
+            data: {
+              totalEarnings: { increment: driverShare },
+              debtBalance: { increment: debtIncrease },
+              totalTrips: { increment: 1 },
+            },
+          });
+
+          // Ledger for driver
+          await this.prisma.ledger.create({
+            data: {
+              userId: driver.userId,
+              orderId: order.id,
+              type: 'EARNING',
+              amount: driverShare,
+              status: 'completed',
+              signature: SignatureUtil.signLedgerEntry({
+                userId: driver.userId,
+                orderId: order.id,
+                type: 'EARNING',
+                amount: driverShare,
+              }),
+            },
+          });
+        }
+      }
+    } catch (err) {
+      this.logger.error(`Failed to process earnings for order ${order.id}:`, err);
     }
   }
 

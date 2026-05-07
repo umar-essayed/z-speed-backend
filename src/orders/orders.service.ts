@@ -501,7 +501,7 @@ export class OrdersService {
     const drivers = await this.driversService.findNearbyDrivers(
       order.restaurant.latitude || 0,
       order.restaurant.longitude || 0,
-      5, // 5km radius
+      30, // Increased to 30km radius as requested
       orderVolume,
     );
 

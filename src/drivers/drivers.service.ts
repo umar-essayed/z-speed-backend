@@ -394,7 +394,7 @@ export class DriversService {
    * Get all currently available drivers (for vendors/admin).
    */
   async getAvailableDrivers() {
-    return this.prisma.driverProfile.findMany({
+    const drivers = await this.prisma.driverProfile.findMany({
       where: {
         isAvailable: true,
         applicationStatus: ApplicationStatus.APPROVED,
@@ -408,9 +408,33 @@ export class DriversService {
             email: true,
           },
         },
-        vehicle: true,
+        vehicle: {
+          select: {
+            type: true,
+            make: true,
+            model: true,
+            year: true,
+            plateNumber: true,
+            color: true,
+          }
+        },
       },
     });
+
+    // Manually ensure sensitive fields are NOT included in the response object
+    // although Prisma 'select' or 'omit' (in newer versions) would handle it, 
+    // explicit mapping is safer here.
+    return drivers.map(d => ({
+      id: d.id,
+      currentLat: d.currentLat,
+      currentLng: d.currentLng,
+      rating: d.rating,
+      totalTrips: d.totalTrips,
+      isAvailable: d.isAvailable,
+      user: d.user,
+      vehicle: d.vehicle,
+      updatedAt: d.updatedAt
+    }));
   }
 
   // =============================================

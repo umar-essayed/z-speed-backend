@@ -61,6 +61,15 @@ export class DriversController {
     return this.driversService.toggleAvailability(userId, status === 'online');
   }
 
+  @Put(':userId/location')
+  @Roles(Role.DRIVER)
+  async updateLocation(
+    @Param('userId') userId: string,
+    @Body() dto: UpdateLocationDto,
+  ) {
+    return this.driversService.updateLocation(userId, dto);
+  }
+
   @Post(':userId/ensure-profile')
   @Roles(Role.DRIVER)
   async ensureProfile(@Param('userId') userId: string) {
@@ -87,7 +96,7 @@ export class DriversController {
 
   @Patch('location')
   @Roles(Role.DRIVER)
-  async updateLocation(
+  async updateMyLocation(
     @CurrentUser('userId') userId: string,
     @Body() dto: UpdateLocationDto,
   ) {

@@ -2,7 +2,7 @@ import { Injectable, Logger, OnModuleInit, Inject, forwardRef } from '@nestjs/co
 import { FirebaseAdminService } from '../firebase/firebase-admin.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../gateway/realtime.gateway';
-import { OrderStatus, PaymentState } from '@prisma/client';
+import { OrderStatus, PaymentState, DeliveryRequestStatus } from '@prisma/client';
 import { SignatureUtil } from '../wallet/signature.util';
 
 @Injectable()
@@ -793,7 +793,7 @@ export class FirebaseSyncService implements OnModuleInit {
           orderId: postgresOrderId,
           driverId: driverProfileId
         },
-        data: { status: 'ACCEPTED' }
+        data: { status: DeliveryRequestStatus.ACCEPTED }
       });
 
       // 5. Cancel other delivery requests for this order
@@ -801,9 +801,9 @@ export class FirebaseSyncService implements OnModuleInit {
         where: {
           orderId: postgresOrderId,
           driverId: { not: driverProfileId },
-          status: 'PENDING'
+          status: DeliveryRequestStatus.PENDING
         },
-        data: { status: 'CANCELLED' }
+        data: { status: DeliveryRequestStatus.EXPIRED }
       });
 
       // 6. Notify Vendor via Socket.io

@@ -74,6 +74,7 @@ enum LedgerType {
   FEE
   DEPOSIT
   WITHDRAWAL
+  DEBT
 }
 
 enum ApprovalStatus {

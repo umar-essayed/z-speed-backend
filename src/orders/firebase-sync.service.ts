@@ -748,6 +748,24 @@ export class FirebaseSyncService implements OnModuleInit {
               }),
             },
           });
+
+          if (isCash && debtIncrease > 0) {
+            await this.prisma.ledger.create({
+              data: {
+                userId: driver.userId,
+                orderId: order.id,
+                type: 'DEBT',
+                amount: debtIncrease,
+                status: 'completed',
+                signature: SignatureUtil.signLedgerEntry({
+                  userId: driver.userId,
+                  orderId: order.id,
+                  type: 'DEBT',
+                  amount: debtIncrease,
+                }),
+              },
+            });
+          }
         }
       }
     } catch (err) {

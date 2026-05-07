@@ -836,6 +836,22 @@ export class OrdersService {
               }),
             },
           });
+
+          // Log DEBT in ledger (Cash collected minus driver share)
+          await this.prisma.ledger.create({
+            data: {
+              userId: driver.userId,
+              orderId: order.id,
+              type: 'DEBT',
+              amount: debtIncrease,
+              signature: SignatureUtil.signLedgerEntry({
+                userId: driver.userId,
+                orderId: order.id,
+                type: 'DEBT',
+                amount: debtIncrease,
+              }),
+            },
+          });
           
         } else {
           // Online Payment: Driver gets their share sent to their wallet

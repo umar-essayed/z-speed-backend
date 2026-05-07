@@ -7,9 +7,11 @@ import {
   Param,
   Query,
   UseGuards,
+  NotFoundException,
 } from '@nestjs/common';
 import { OrderStatus, Role } from '@prisma/client';
 import { OrdersService } from './orders.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { SuperTokensAuthGuard } from '../common/guards/auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -124,7 +126,10 @@ export class OrdersController {
 @UseGuards(SuperTokensAuthGuard, RolesGuard)
 @Roles(Role.VENDOR)
 export class VendorOrdersController {
-  constructor(private readonly ordersService: OrdersService) {}
+  constructor(
+    private readonly ordersService: OrdersService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   @Get()
   async getVendorOrders(

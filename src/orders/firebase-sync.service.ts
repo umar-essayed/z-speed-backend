@@ -920,7 +920,11 @@ export class FirebaseSyncService implements OnModuleInit {
         expiresAt: data.expiresAt,
         createdAt: new Date(),
         restaurantName: data.restaurantName,
+        restaurantLogoUrl: data.restaurantLogoUrl || null,
         deliveryAddress: data.deliveryAddress,
+        customerName: data.customerName || 'Customer',
+        orderTotal: data.orderTotal || 0.0,
+        paymentMethod: data.paymentMethod || 'cash',
       });
 
       this.logger.log(`🚀 Delivery request created in Firebase for driver ${driver.user.firebaseUid}`);

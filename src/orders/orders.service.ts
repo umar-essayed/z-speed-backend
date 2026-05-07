@@ -549,7 +549,7 @@ export class OrdersService {
   async assignDriversToOrder(orderId: string) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      include: { restaurant: true, items: true },
+      include: { restaurant: true, items: true, customer: true },
     });
     if (!order) return;
 
@@ -587,7 +587,11 @@ export class OrdersService {
             estimatedDistance: distance,
             expiresAt,
             restaurantName: order.restaurant.name,
+            restaurantLogoUrl: order.restaurant.logoUrl,
             deliveryAddress: order.deliveryAddress,
+            customerName: order.customer?.name || 'Customer',
+            orderTotal: order.total,
+            paymentMethod: order.paymentMethod,
           });
           return req;
         })
@@ -652,7 +656,7 @@ export class OrdersService {
   async requestDriver(orderId: string, driverId: string) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      include: { restaurant: true },
+      include: { restaurant: true, customer: true },
     });
     if (!order) throw new NotFoundException('Order not found');
 
@@ -686,7 +690,11 @@ export class OrdersService {
       estimatedDistance: distance,
       expiresAt,
       restaurantName: order.restaurant.name,
+      restaurantLogoUrl: order.restaurant.logoUrl,
       deliveryAddress: order.deliveryAddress,
+      customerName: order.customer?.name || 'Customer',
+      orderTotal: order.total,
+      paymentMethod: order.paymentMethod,
     });
 
     // Notify driver

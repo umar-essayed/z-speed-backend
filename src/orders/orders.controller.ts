@@ -157,6 +157,9 @@ export class VendorOrdersController {
   async manualDispatch(
     @Param('id', ParseUUIDPipe) id: string,
   ) {
+    const order = await this.prisma.order.findUnique({ where: { id } });
+    if (!order) throw new NotFoundException('Order not found in Postgres');
+    
     await this.ordersService.assignDriversToOrder(id);
     return { success: true, message: 'Dispatch process initiated' };
   }

@@ -314,9 +314,20 @@ export class OrdersService {
       );
     }
 
+    let driverToCustomerDistance = null;
+    if (order.driver && order.driver.currentLat && order.driver.currentLng && order.deliveryLat && order.deliveryLng) {
+      driverToCustomerDistance = this.getDistance(
+        order.driver.currentLat,
+        order.driver.currentLng,
+        order.deliveryLat,
+        order.deliveryLng
+      );
+    }
+
     return {
       ...order,
       customerDistance,
+      driverToCustomerDistance,
       estimatedDeliveryTime: customerDistance ? Math.round((customerDistance / 20) * 60 + 15) : null
     };
   }
@@ -375,9 +386,20 @@ export class OrdersService {
         );
       }
       
+      let driverToCustomerDistance = null;
+      if (order.driver && order.driver.currentLat && order.driver.currentLng && order.deliveryLat && order.deliveryLng) {
+        driverToCustomerDistance = this.getDistance(
+          order.driver.currentLat,
+          order.driver.currentLng,
+          order.deliveryLat,
+          order.deliveryLng
+        );
+      }
+      
       return {
         ...order,
         customerDistance,
+        driverToCustomerDistance,
         estimatedDeliveryTime: customerDistance ? Math.round((customerDistance / 20) * 60 + 15) : null
       };
     });

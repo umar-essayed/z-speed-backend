@@ -113,6 +113,7 @@ export class AuthService {
         emailVerified: true,
         authProvider: 'email',
       },
+      include: { driverProfile: true },
     });
 
     const tokens = this.generateTokens(user);
@@ -141,6 +142,7 @@ export class AuthService {
     // Find user in our DB
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email },
+      include: { driverProfile: true },
     });
 
     if (!user) {
@@ -155,6 +157,7 @@ export class AuthService {
           emailVerified: true,
           authProvider: 'email',
         },
+        include: { driverProfile: true },
       });
       const tokens = this.generateTokens(newUser);
       return {
@@ -285,6 +288,7 @@ export class AuthService {
         appleId: provider === 'apple' ? externalId : undefined,
         profileImage,
       },
+      include: { driverProfile: true },
     });
 
     const tokens = this.generateTokens(user);
@@ -375,12 +379,14 @@ export class AuthService {
           emailVerified: true,
           authProvider: 'google',
         },
+        include: { driverProfile: true },
       });
     } else if (!user.supabaseId) {
       // Link the existing user to this Supabase ID
       user = await this.prisma.user.update({
         where: { id: user.id },
         data: { supabaseId: sbUser.id },
+        include: { driverProfile: true },
       });
     }
 
@@ -437,6 +443,7 @@ export class AuthService {
           phoneVerified: true,
           isPhoneVerified: true,
         },
+        include: { driverProfile: true },
       });
       return {
         message: 'تم التحقق من رقم الهاتف بنجاح',
@@ -501,6 +508,7 @@ export class AuthService {
         data: {
           emailVerified: true,
         },
+        include: { driverProfile: true },
       });
       return {
         message: 'تم التحقق من البريد الإلكتروني بنجاح',
@@ -537,7 +545,10 @@ export class AuthService {
   }
 
   async getCurrentUser(userId: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    const user = await this.prisma.user.findUnique({ 
+      where: { id: userId },
+      include: { driverProfile: true },
+    });
     if (!user) throw new NotFoundException('المستخدم غير موجود');
     return { user: this.formatUser(user) };
   }
@@ -606,7 +617,10 @@ export class AuthService {
     this.logger.warn(`🚨 DEBUG LOGIN triggered for: ${email} as ${role}`);
 
     // Find or create the user directly in DB — no external auth needed
-    let user = await this.prisma.user.findFirst({ where: { email } });
+    let user = await this.prisma.user.findFirst({ 
+      where: { email },
+      include: { driverProfile: true },
+    });
     if (!user) {
       user = await this.prisma.user.create({
         data: {
@@ -618,6 +632,7 @@ export class AuthService {
           emailVerified: true,
           authProvider: 'email',
         },
+        include: { driverProfile: true },
       });
     }
 
@@ -644,6 +659,7 @@ export class AuthService {
     const user = await this.prisma.user.update({
       where: { id: userId },
       data,
+      include: { driverProfile: true },
     });
 
     return { message: 'تم تحديث الملف الشخصي بنجاح', user: this.formatUser(user) };
@@ -667,6 +683,8 @@ export class AuthService {
       walletBalance: user.walletBalance,
       loyaltyPoints: user.loyaltyPoints,
       authProvider: user.authProvider,
+      applicationStatus: user.driverProfile?.applicationStatus,
+      rejectionReason: user.driverProfile?.rejectionReason,
     };
   }
 }

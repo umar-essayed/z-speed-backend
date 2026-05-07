@@ -393,7 +393,11 @@ export class DriversService {
   /**
    * Get all currently available drivers (for vendors/admin).
    */
-  async getAvailableDrivers() {
+  /**
+   * Get all currently available drivers (for vendors/admin).
+   * Now supports optional lat/lng for distance calculation and radius filtering.
+   */
+  async getAvailableDrivers(lat?: number, lng?: number, radiusKm: number = 30) {
     const drivers = await this.prisma.driverProfile.findMany({
       where: {
         isAvailable: true,
@@ -418,23 +422,52 @@ export class DriversService {
             color: true,
           }
         },
+        deliveries: {
+          where: {
+            status: { in: [OrderStatus.CONFIRMED, OrderStatus.PREPARING, OrderStatus.READY] }
+          },
+          select: { id: true }
+        }
       },
     });
 
-    // Manually ensure sensitive fields are NOT included in the response object
-    // although Prisma 'select' or 'omit' (in newer versions) would handle it, 
-    // explicit mapping is safer here.
-    return drivers.map(d => ({
-      id: d.id,
-      currentLat: d.currentLat,
-      currentLng: d.currentLng,
-      rating: d.rating,
-      totalTrips: d.totalTrips,
-      isAvailable: d.isAvailable,
-      user: d.user,
-      vehicle: d.vehicle,
-      updatedAt: d.updatedAt
-    }));
+    const mapped = drivers.map(d => {
+      let distance = null;
+      if (lat && lng && d.currentLat && d.currentLng) {
+        distance = this.calculateDistance(lat, lng, d.currentLat, d.currentLng);
+      }
+
+      return {
+        id: d.id,
+        currentLat: d.currentLat,
+        currentLng: d.currentLng,
+        distance, // In KM
+        rating: d.rating,
+        totalTrips: d.totalTrips,
+        isAvailable: d.isAvailable,
+        isBusy: d.deliveries.length > 0,
+        user: d.user,
+        vehicle: d.vehicle,
+        updatedAt: d.updatedAt
+      };
+    });
+
+    // Filter by radius and sort by distance
+    return mapped
+      .filter(d => (distance === null || d.distance <= radiusKm))
+      .sort((a, b) => (a.distance || 999) - (b.distance || 999));
+  }
+
+  private calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371; // Earth radius in km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = 
+      Math.sin(dLat/2) * Math.sin(dLat/2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+      Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
   }
 
   // =============================================

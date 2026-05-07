@@ -431,39 +431,41 @@ export class FirebaseSyncService implements OnModuleInit {
   // Sync Drivers FROM Firebase TO Postgres
   private async syncDriver(doc: any) {
     const data = doc.data();
-    const uid = doc.id; // Usually the UID
-    this.logger.log(`Syncing Firebase driver: ${data.name || uid}`);
+    const uid = doc.id;
 
     try {
-      // 1. Resolve/Create User first
+      // 1. Create or Update User record
       let user = await this.prisma.user.findFirst({
-        where: { firebaseUid: uid }
+        where: { OR: [{ firebaseUid: uid }, { email: data.email }] }
       });
 
+      const userData = {
+        firebaseUid: uid,
+        email: data.email || `${uid}@driver.zspeed.com`,
+        name: data.name || data.fullName || 'Driver User',
+        phone: data.phone || data.phoneNumber || null,
+        role: 'DRIVER' as any,
+        profileImage: data.profileImage || data.imageUrl || null,
+      };
+
       if (!user) {
-        // Fetch from Auth or create skeleton
         try {
           const authUser = await this.firebaseAdmin.getAuth().getUser(uid);
-          user = await this.prisma.user.create({
-            data: {
-              firebaseUid: uid,
-              email: authUser.email || `${uid}@driver.zspeed.com`,
-              name: authUser.displayName || data.name || 'Driver User',
-              phone: authUser.phoneNumber || data.phone || null,
-              role: 'DRIVER',
-            }
-          });
-        } catch (err) {
-          user = await this.prisma.user.create({
-            data: {
-              firebaseUid: uid,
-              email: data.email || `${uid}@driver.zspeed.com`,
-              name: data.name || 'Driver User',
-              role: 'DRIVER',
-              phone: data.phone || null,
-            }
-          });
-        }
+          userData.email = authUser.email || userData.email;
+          userData.name = authUser.displayName || userData.name;
+          userData.phone = authUser.phoneNumber || userData.phone;
+        } catch (e) {}
+        user = await this.prisma.user.create({ data: userData });
+      } else {
+        // Update existing user to keep name/phone in sync
+        user = await this.prisma.user.update({
+          where: { id: user.id },
+          data: {
+            name: userData.name,
+            phone: userData.phone,
+            profileImage: userData.profileImage,
+          }
+        });
       }
 
       // Flexible mapping for location and status
@@ -472,7 +474,7 @@ export class FirebaseSyncService implements OnModuleInit {
       const isOnline = data.online === true || data.isOnline === true || data.status === 'online' || data.isAvailable === true;
 
       // 2. Create or Update DriverProfile
-      await this.prisma.driverProfile.upsert({
+      const profile = await this.prisma.driverProfile.upsert({
         where: { userId: user.id },
         update: {
           currentLat: lat ? parseFloat(lat.toString()) : null,
@@ -495,7 +497,30 @@ export class FirebaseSyncService implements OnModuleInit {
         }
       });
 
-      this.logger.log(`✅ Synced Driver: ${data.name || uid} | Online: ${data.online}`);
+      // 3. Create or Update Vehicle
+      if (data.vehicle || data.vehicleInfo) {
+        const v = data.vehicle || data.vehicleInfo;
+        await this.prisma.vehicle.upsert({
+          where: { driverProfileId: profile.id },
+          update: {
+            type: v.type || v.vehicleType || 'MOTORCYCLE',
+            make: v.make || v.brand || null,
+            model: v.model || null,
+            plateNumber: v.plateNumber || v.licensePlate || null,
+            color: v.color || null,
+          },
+          create: {
+            driverProfileId: profile.id,
+            type: v.type || v.vehicleType || 'MOTORCYCLE',
+            make: v.make || v.brand || null,
+            model: v.model || null,
+            plateNumber: v.plateNumber || v.licensePlate || null,
+            color: v.color || null,
+          }
+        });
+      }
+
+      this.logger.log(`✅ Synced Driver: ${userData.name} | Online: ${isOnline}`);
 
     } catch (error) {
       this.logger.error(`Error syncing driver ${uid}:`, error);

@@ -23,9 +23,17 @@ export class DriversController {
   constructor(private readonly driversService: DriversService) {}
 
   @Get('available')
-  @Roles(Role.DRIVER, Role.VENDOR, Role.ADMIN)
-  async getAvailableDrivers() {
-    return this.driversService.getAvailableDrivers();
+  @Roles(Role.VENDOR, Role.ADMIN)
+  async getAvailable(
+    @Query('lat') lat?: string,
+    @Query('lng') lng?: string,
+    @Query('radius') radius?: string
+  ) {
+    return this.driversService.getAvailableDrivers(
+      lat ? parseFloat(lat) : undefined,
+      lng ? parseFloat(lng) : undefined,
+      radius ? parseFloat(radius) : 30
+    );
   }
 
   @Post('apply')

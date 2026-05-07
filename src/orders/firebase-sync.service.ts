@@ -9,11 +9,6 @@ import { SignatureUtil } from '../wallet/signature.util';
 export class FirebaseSyncService implements OnModuleInit {
   private readonly logger = new Logger(FirebaseSyncService.name);
 
-  // Temporary mappings to bridge Firebase to PostgreSQL for the vendor dashboard test
-  private readonly DEFAULT_RESTAURANT_ID = '794c1583-0c99-47d5-96b4-705d12901cf5'; // Test Restaurant
-  private readonly DEFAULT_CUSTOMER_ID = '4b146d23-8089-4162-b611-0b7f50c32c98'; // Z-SPEED Customer
-  private readonly DEFAULT_FOOD_ITEM_ID = '9e847040-c7d6-46e7-a546-2eb6120782de'; // Test Burger
-
   constructor(
     private readonly firebaseAdmin: FirebaseAdminService,
     private readonly prisma: PrismaService,
@@ -40,10 +35,8 @@ export class FirebaseSyncService implements OnModuleInit {
         const data = change.doc.data();
         
         if (change.type === 'added' || (change.type === 'modified' && !data.syncedToPostgres)) {
-          // New order or order that hasn't been synced yet
-          if (data.status === 'pending' && !data.syncedToPostgres) {
-            await this.syncOrder(change.doc);
-          }
+          // Sync any new/unsynced order regardless of status
+          await this.syncOrder(change.doc);
         } else if (change.type === 'modified' && data.syncedToPostgres && data.postgresOrderId) {
           // Order already exists in Postgres, sync updates from Firebase (Driver/Customer actions)
           await this.syncStatusFromFirebase(change.doc);
@@ -91,19 +84,12 @@ export class FirebaseSyncService implements OnModuleInit {
       this.logger.log(`Syncing Firebase order: ${doc.id}`);
 
       // 1. Resolve Customer
-      let customerId = this.DEFAULT_CUSTOMER_ID;
+      let customerId: string | null = null;
       if (data.customerId) {
         let user = await this.prisma.user.findFirst({
           where: { firebaseUid: data.customerId }
         });
-        // Fallback to supabaseId just in case
-        if (!user) {
-          user = await this.prisma.user.findFirst({
-            where: { supabaseId: data.customerId }
-          });
-        }
         
-        // If user still not found, try to fetch from Firebase Auth and create in Postgres
         if (!user) {
           try {
             const authUser = await this.firebaseAdmin.getAuth().getUser(data.customerId);
@@ -120,15 +106,28 @@ export class FirebaseSyncService implements OnModuleInit {
               this.logger.log(`Created missing user in Postgres: ${user.id} from Firebase Auth`);
             }
           } catch (err) {
-            this.logger.warn(`Could not fetch user from Firebase Auth: ${err.message}`);
+            // Create skeleton user if not in Auth
+            user = await this.prisma.user.create({
+              data: {
+                firebaseUid: data.customerId,
+                email: `${data.customerId}@temp.zspeed.com`,
+                name: data.customerName || 'Z-SPEED Customer',
+                role: 'CUSTOMER',
+              }
+            });
           }
         }
 
         if (user) customerId = user.id;
       }
 
+      if (!customerId) {
+        this.logger.error(`Could not resolve customer for order ${doc.id}`);
+        return;
+      }
+
       // 2. Resolve Restaurant
-      let restaurantId = this.DEFAULT_RESTAURANT_ID;
+      let restaurantId: string | null = null;
       if (data.restaurantId) {
         const restaurant = await this.prisma.restaurant.findFirst({
           where: { firebaseId: data.restaurantId }
@@ -136,11 +135,16 @@ export class FirebaseSyncService implements OnModuleInit {
         if (restaurant) restaurantId = restaurant.id;
       }
 
+      if (!restaurantId) {
+        this.logger.error(`Could not resolve restaurant for order ${doc.id} (Firebase ID: ${data.restaurantId})`);
+        return;
+      }
+
       // 3. Resolve Items
       const itemsToCreate = [];
       if (data.items && Array.isArray(data.items)) {
         for (const item of data.items) {
-          let foodItemId = this.DEFAULT_FOOD_ITEM_ID;
+          let foodItemId: string | null = null;
           if (item.menuItemId || item.id) {
             const fbId = item.menuItemId || item.id;
             const dbItem = await this.prisma.foodItem.findFirst({
@@ -149,12 +153,14 @@ export class FirebaseSyncService implements OnModuleInit {
             if (dbItem) foodItemId = dbItem.id;
           }
 
-          itemsToCreate.push({
-            foodItem: { connect: { id: foodItemId } }, 
-            quantity: item.quantity || 1,
-            unitPrice: item.price || 0,
-            specialNote: item.name || 'Synced Item',
-          });
+          if (foodItemId) {
+            itemsToCreate.push({
+              foodItem: { connect: { id: foodItemId } }, 
+              quantity: item.quantity || 1,
+              unitPrice: item.price || 0,
+              specialNote: item.name || 'Synced Item',
+            });
+          }
         }
       }
 
@@ -164,7 +170,7 @@ export class FirebaseSyncService implements OnModuleInit {
           customerId,
           restaurantId,
           firebaseOrderId: doc.id,
-          status: OrderStatus.PENDING,
+          status: this.mapFirebaseToPostgresStatus(data.status) || OrderStatus.PENDING,
           subtotal: data.subtotal || data.total || 0,
           deliveryFee: data.deliveryFee || 0,
           serviceFee: data.serviceFee || 0,

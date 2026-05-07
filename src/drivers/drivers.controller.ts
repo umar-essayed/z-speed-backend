@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Patch,
   Body,
   Param,
@@ -34,6 +35,36 @@ export class DriversController {
       lng ? parseFloat(lng) : undefined,
       radius ? parseFloat(radius) : 30
     );
+  }
+
+  @Get(':userId/profile')
+  @Roles(Role.DRIVER, Role.ADMIN, Role.VENDOR)
+  async getProfile(@Param('userId') userId: string) {
+    return this.driversService.getDriverProfile(userId);
+  }
+
+  @Put(':userId/profile')
+  @Roles(Role.DRIVER)
+  async updateProfile(
+    @Param('userId') userId: string,
+    @Body() dto: any,
+  ) {
+    return this.driversService.updateProfile(userId, dto);
+  }
+
+  @Put(':userId/status')
+  @Roles(Role.DRIVER)
+  async updateStatus(
+    @Param('userId') userId: string,
+    @Body('status') status: string,
+  ) {
+    return this.driversService.toggleAvailability(userId, status === 'online');
+  }
+
+  @Post(':userId/ensure-profile')
+  @Roles(Role.DRIVER)
+  async ensureProfile(@Param('userId') userId: string) {
+    return this.driversService.ensureProfile(userId);
   }
 
   @Post('apply')

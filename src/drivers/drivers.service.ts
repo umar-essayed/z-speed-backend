@@ -100,6 +100,27 @@ export class DriversService {
   }
 
   /**
+   * Update driver profile fields.
+   */
+  async updateProfile(userId: string, data: any) {
+    // If wallet balance is being updated, we update the User model
+    if (data.walletBalance !== undefined) {
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { walletBalance: data.walletBalance },
+      });
+      delete data.walletBalance;
+    }
+
+    if (Object.keys(data).length === 0) return { message: 'User wallet updated' };
+
+    return this.prisma.driverProfile.update({
+      where: { userId },
+      data,
+    });
+  }
+
+  /**
    * Toggle driver online/offline status.
    */
   async toggleAvailability(userId: string, isAvailable: boolean) {
@@ -476,6 +497,69 @@ export class DriversService {
   // =============================================
   // HELPERS
   // =============================================
+
+  /**
+   * Ensure a driver profile exists for the user.
+   * Creates one if it doesn't exist.
+   */
+  async ensureProfile(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+    if (!user) throw new NotFoundException('User not found');
+    if (user.role !== Role.DRIVER) {
+      throw new BadRequestException('User is not a DRIVER');
+    }
+
+    const profile = await this.prisma.driverProfile.upsert({
+      where: { userId },
+      create: {
+        userId,
+        applicationStatus: ApplicationStatus.PENDING,
+      },
+      update: {}, // Do nothing if already exists
+    });
+
+    return profile;
+  }
+
+  /**
+   * Get full driver profile including vehicle and user data.
+   */
+  async getDriverProfile(userId: string) {
+    const profile = await this.prisma.driverProfile.findUnique({
+      where: { userId },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            phone: true,
+            email: true,
+            profileImage: true,
+            walletBalance: true,
+          },
+        },
+        vehicle: true,
+      },
+    });
+
+    if (!profile) throw new NotFoundException('Driver profile not found');
+
+    // Map to the format expected by Flutter (which might be slightly different than DB)
+    return {
+      ...profile,
+      name: profile.user.name,
+      phoneNumber: profile.user.phone,
+      walletBalance: profile.user.walletBalance,
+      vehicleType: profile.vehicle?.type ?? '',
+      vehicleMake: profile.vehicle?.make ?? '',
+      vehicleModel: profile.vehicle?.model ?? '',
+      licensePlate: profile.vehicle?.plateNumber ?? '',
+      licenseNumber: profile.nationalId ?? '', // Using nationalId as placeholder for licenseNumber if needed
+      status: profile.isAvailable ? 'online' : 'offline',
+    };
+  }
 
   private async getProfile(userId: string) {
     const profile = await this.prisma.driverProfile.findUnique({

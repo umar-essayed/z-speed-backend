@@ -454,7 +454,7 @@ export class DriversService {
 
     // Filter by radius and sort by distance
     return mapped
-      .filter(d => (distance === null || d.distance <= radiusKm))
+      .filter(d => (d.distance === null || d.distance <= radiusKm))
       .sort((a, b) => (a.distance || 999) - (b.distance || 999));
   }
 

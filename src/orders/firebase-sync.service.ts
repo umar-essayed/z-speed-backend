@@ -466,25 +466,32 @@ export class FirebaseSyncService implements OnModuleInit {
         }
       }
 
+      // Flexible mapping for location and status
+      const lat = data.lastLocation?.latitude || data.latitude || data.lat || data.currentLat || null;
+      const lng = data.lastLocation?.longitude || data.longitude || data.lng || data.currentLng || null;
+      const isOnline = data.online === true || data.isOnline === true || data.status === 'online' || data.isAvailable === true;
+
       // 2. Create or Update DriverProfile
       await this.prisma.driverProfile.upsert({
         where: { userId: user.id },
         update: {
-          currentLat: data.lastLocation?.latitude || data.latitude || null,
-          currentLng: data.lastLocation?.longitude || data.longitude || null,
-          isAvailable: data.online === true || data.status === 'online',
-          rating: data.rating || 0,
+          currentLat: lat ? parseFloat(lat.toString()) : null,
+          currentLng: lng ? parseFloat(lng.toString()) : null,
+          isAvailable: isOnline,
+          rating: data.rating || 5.0,
           totalTrips: data.totalTrips || 0,
           lastPingAt: new Date(),
+          applicationStatus: 'APPROVED',
         },
         create: {
           userId: user.id,
-          currentLat: data.lastLocation?.latitude || data.latitude || null,
-          currentLng: data.lastLocation?.longitude || data.longitude || null,
-          isAvailable: data.online === true || data.status === 'online',
-          rating: data.rating || 0,
+          currentLat: lat ? parseFloat(lat.toString()) : null,
+          currentLng: lng ? parseFloat(lng.toString()) : null,
+          isAvailable: isOnline,
+          rating: data.rating || 5.0,
           totalTrips: data.totalTrips || 0,
           lastPingAt: new Date(),
+          applicationStatus: 'APPROVED',
         }
       });
 

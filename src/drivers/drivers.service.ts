@@ -16,6 +16,7 @@ import { RealtimeGateway } from '../gateway/realtime.gateway';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ApplyDriverDto, UpdateLocationDto } from './dto';
 import Redis from 'ioredis';
+import { FirebaseAdminService } from '../firebase/firebase-admin.service';
 
 @Injectable()
 export class DriversService {
@@ -26,6 +27,7 @@ export class DriversService {
     private readonly gateway: RealtimeGateway,
     private readonly notifications: NotificationsService,
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
+    private readonly firebaseAdmin: FirebaseAdminService,
   ) {}
 
   /**
@@ -96,6 +98,20 @@ export class DriversService {
 
     if (dto.currentLng && dto.currentLat) {
       await this.redis.geoadd('drivers:locations', dto.currentLng, dto.currentLat, updated.id);
+      
+      // Sync to Firebase for Vendor Dashboard
+      const firestore = this.firebaseAdmin.getFirestore();
+      if (firestore) {
+        const user = await this.prisma.user.findUnique({ where: { id: userId } });
+        if (user && user.firebaseUid) {
+          await firestore.collection('driverProfiles').doc(user.firebaseUid).set({
+            latitude: dto.currentLat,
+            longitude: dto.currentLng,
+            lastPingAt: new Date(),
+            online: updated.isAvailable,
+          }, { merge: true });
+        }
+      }
     }
     return updated;
   }
@@ -132,6 +148,18 @@ export class DriversService {
 
     if (!isAvailable) {
       await this.redis.zrem('drivers:locations', updated.id);
+    }
+
+    // Sync availability to Firebase
+    const firestore = this.firebaseAdmin.getFirestore();
+    if (firestore) {
+      const user = await this.prisma.user.findUnique({ where: { id: userId } });
+      if (user && user.firebaseUid) {
+        await firestore.collection('driverProfiles').doc(user.firebaseUid).update({
+          online: isAvailable,
+          updatedAt: new Date(),
+        });
+      }
     }
     return updated;
   }

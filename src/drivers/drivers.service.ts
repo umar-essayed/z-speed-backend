@@ -402,10 +402,13 @@ export class DriversService {
       where: {
         isAvailable: true,
         applicationStatus: ApplicationStatus.APPROVED,
+        currentLat: { not: null },
+        currentLng: { not: null },
       },
       include: {
         user: {
           select: {
+            id: true,
             name: true,
             phone: true,
             profileImage: true,

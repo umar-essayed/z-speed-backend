@@ -304,7 +304,21 @@ export class OrdersService {
       throw new ForbiddenException('Not your restaurant order');
     }
 
-    return order;
+    let customerDistance = null;
+    if (order.restaurant.latitude && order.restaurant.longitude && order.deliveryLat && order.deliveryLng) {
+      customerDistance = this.getDistance(
+        order.restaurant.latitude,
+        order.restaurant.longitude,
+        order.deliveryLat,
+        order.deliveryLng
+      );
+    }
+
+    return {
+      ...order,
+      customerDistance,
+      estimatedDeliveryTime: customerDistance ? Math.round((customerDistance / 20) * 60 + 15) : null
+    };
   }
 
   /**
@@ -333,7 +347,8 @@ export class OrdersService {
         skip: (page - 1) * limit,
         take: limit,
         orderBy: { createdAt: 'desc' },
-        include: { 
+        include: {
+          restaurant: true,
           items: { include: { foodItem: true } },
           customer: true,
           driver: { include: { user: { select: { name: true, phone: true } } } },
@@ -349,8 +364,26 @@ export class OrdersService {
       this.prisma.order.count({ where }),
     ]);
 
+    const mappedData = data.map(order => {
+      let customerDistance = null;
+      if (order.restaurant.latitude && order.restaurant.longitude && order.deliveryLat && order.deliveryLng) {
+        customerDistance = this.getDistance(
+          order.restaurant.latitude,
+          order.restaurant.longitude,
+          order.deliveryLat,
+          order.deliveryLng
+        );
+      }
+      
+      return {
+        ...order,
+        customerDistance,
+        estimatedDeliveryTime: customerDistance ? Math.round((customerDistance / 20) * 60 + 15) : null
+      };
+    });
+
     return {
-      data,
+      data: mappedData,
       total,
       page: Number(page),
       limit: Number(limit),
@@ -569,8 +602,19 @@ export class OrdersService {
     // Use radius 30km for eligibility
     const nearby = await this.driversService.getAvailableDrivers(lat, lng, 30);
     
+    // De-duplicate by userId to avoid multiple profiles for same person
+    const uniqueDriversMap = new Map();
+    nearby.forEach(d => {
+      const uId = d.user?.id || d.id;
+      if (!uniqueDriversMap.has(uId)) {
+        uniqueDriversMap.set(uId, d);
+      }
+    });
+
+    const uniqueNearby = Array.from(uniqueDriversMap.values());
+    
     // Sort by distance ASC
-    return nearby.sort((a, b) => (a.distance || 999) - (b.distance || 999)).map(d => {
+    return uniqueNearby.sort((a, b) => (a.distance || 999) - (b.distance || 999)).map(d => {
        // Estimate time: distance / avg speed (20 km/h) + buffer
        const estimatedTimeMin = d.distance ? Math.round((d.distance / 20) * 60 + 5) : null;
        return {

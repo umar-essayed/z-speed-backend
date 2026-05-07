@@ -683,7 +683,7 @@ export class AuthService {
       walletBalance: user.walletBalance,
       loyaltyPoints: user.loyaltyPoints,
       authProvider: user.authProvider,
-      applicationStatus: user.driverProfile?.applicationStatus,
+      applicationStatus: user.driverProfile?.applicationStatus?.toLowerCase(),
       rejectionReason: user.driverProfile?.rejectionReason,
     };
   }

@@ -34,6 +34,7 @@ import { FavoritesModule } from './favorites/favorites.module';
 import { OnboardingModule } from './onboarding/onboarding.module';
 import { SupabaseModule } from './common/supabase/supabase.module';
 import { FirebaseModule } from './firebase/firebase.module';
+import { ApplicationsModule } from './applications/applications.module';
 
 @Module({
   imports: [
@@ -85,6 +86,7 @@ import { FirebaseModule } from './firebase/firebase.module';
     RedisModule,
     FavoritesModule,
     OnboardingModule,
+    ApplicationsModule,
   ],
   providers: [
     {

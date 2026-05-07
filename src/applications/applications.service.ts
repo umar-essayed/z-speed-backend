@@ -38,7 +38,7 @@ export class ApplicationsService {
           make: profile.vehicle.make,
           model: profile.vehicle.model,
           year: profile.vehicle.year,
-          licensePlate: profile.vehicle.licensePlate,
+          plateNumber: profile.vehicle.plateNumber,
           color: profile.vehicle.color,
         } : {},
         documents: {
@@ -94,7 +94,7 @@ export class ApplicationsService {
           make: profile.vehicle.make,
           model: profile.vehicle.model,
           year: profile.vehicle.year,
-          licensePlate: profile.vehicle.licensePlate,
+          plateNumber: profile.vehicle.plateNumber,
           color: profile.vehicle.color,
         } : {},
         documents: {

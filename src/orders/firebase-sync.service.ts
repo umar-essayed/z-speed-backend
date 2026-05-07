@@ -223,12 +223,14 @@ export class FirebaseSyncService implements OnModuleInit {
       // 5. Broadcast to Dashboard
       this.gateway.emitToVendor(restaurantId, 'order:new', order);
 
-      // 5.1 Trigger Driver Assignment if confirmed
+      // 5.1 Trigger Driver Assignment if confirmed (DISABLED TEMPORARILY AS REQUESTED)
+      /*
       if (order.status === OrderStatus.CONFIRMED) {
         this.ordersService.assignDriversToOrder(order.id).catch(err => 
           this.logger.error(`Auto-dispatch failed for synced order ${order.id}:`, err.stack)
         );
       }
+      */
 
       // 6. Mark as synced in Firebase
       await doc.ref.update({
@@ -613,12 +615,14 @@ export class FirebaseSyncService implements OnModuleInit {
         // Broadcast to Vendor dashboard
         this.gateway.emitToVendor(order.restaurantId, 'order:status_changed', updatedOrder);
 
-        // If status moved to CONFIRMED, trigger dispatch
+        // If status moved to CONFIRMED, trigger dispatch (DISABLED TEMPORARILY AS REQUESTED)
+        /*
         if (targetStatus === OrderStatus.CONFIRMED && order.status === OrderStatus.PENDING) {
            this.ordersService.assignDriversToOrder(postgresOrderId).catch(err => 
              this.logger.error(`Auto-dispatch failed for updated order ${postgresOrderId}:`, err.stack)
            );
         }
+        */
 
         // If delivered, handle earnings
         if (targetStatus === OrderStatus.DELIVERED && order.status !== OrderStatus.DELIVERED) {

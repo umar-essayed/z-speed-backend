@@ -168,4 +168,21 @@ export class VendorOrdersController {
     await this.ordersService.assignDriversToOrder(id);
     return { success: true, message: 'Dispatch process initiated' };
   }
+
+  @Get(':id/eligible-drivers')
+  @Roles(Role.VENDOR, Role.ADMIN)
+  async getEligibleDrivers(
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.ordersService.getEligibleDrivers(id);
+  }
+
+  @Post(':id/request-driver')
+  @Roles(Role.VENDOR, Role.ADMIN)
+  async requestSpecificDriver(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('driverId', ParseUUIDPipe) driverId: string,
+  ) {
+    return this.ordersService.requestDriver(id, driverId);
+  }
 }

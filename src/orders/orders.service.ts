@@ -376,10 +376,12 @@ export class OrdersService {
     switch (dto.status) {
       case OrderStatus.CONFIRMED:
         timestamps.acceptedAt = new Date();
-        // Trigger driver assignment as soon as vendor confirms
+        // Trigger driver assignment disabled temporarily for manual selection
+        /*
         this.assignDriversToOrder(orderId).catch(err => 
           this.logger.error(`Failed to assign drivers to order ${orderId}`, err.stack)
         );
+        */
         break;
       case OrderStatus.PREPARING:
         timestamps.preparingAt = new Date();
@@ -549,6 +551,83 @@ export class OrdersService {
     }
 
     this.logger.log(`Delivery requests sent to ${drivers.length} drivers for order ${orderId}`);
+  }
+
+  /**
+   * Get drivers eligible for this specific order, sorted by proximity.
+   */
+  async getEligibleDrivers(orderId: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { restaurant: true },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+
+    const lat = order.restaurant.latitude || 0;
+    const lng = order.restaurant.longitude || 0;
+
+    // Use radius 30km for eligibility
+    const nearby = await this.driversService.getAvailableDrivers(lat, lng, 30);
+    
+    // Sort by distance ASC
+    return nearby.sort((a, b) => (a.distance || 999) - (b.distance || 999)).map(d => {
+       // Estimate time: distance / avg speed (20 km/h) + buffer
+       const estimatedTimeMin = d.distance ? Math.round((d.distance / 20) * 60 + 5) : null;
+       return {
+         ...d,
+         estimatedTimeMin
+       };
+    });
+  }
+
+  /**
+   * Send a delivery request to a specific driver.
+   */
+  async requestDriver(orderId: string, driverId: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { restaurant: true },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+
+    const driver = await this.prisma.driverProfile.findUnique({
+      where: { id: driverId },
+      include: { user: true }
+    });
+    if (!driver) throw new NotFoundException('Driver not found');
+
+    // Create delivery request
+    const distance = (order.restaurant.latitude && order.restaurant.longitude && driver.currentLat && driver.currentLng)
+      ? this.driversService.calculateDistance(order.restaurant.latitude, order.restaurant.longitude, driver.currentLat, driver.currentLng)
+      : 0;
+
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 min expiration
+    
+    const request = await this.prisma.deliveryRequest.create({
+      data: {
+        orderId,
+        driverId,
+        expiresAt,
+        deliveryFee: order.deliveryFee,
+        estimatedDistance: distance,
+      },
+    });
+
+    // Sync to Firebase
+    await this.firebaseSync.createDeliveryRequestInFirebase(driverId, orderId, {
+      firebaseOrderId: order.firebaseOrderId,
+      deliveryFee: order.deliveryFee,
+      estimatedDistance: distance,
+      expiresAt,
+      restaurantName: order.restaurant.name,
+      deliveryAddress: order.deliveryAddress,
+    });
+
+    // Notify driver
+    await this.notifications.notifyAvailableDrivers([driver.userId], orderId);
+    this.gateway.emitToDriver(driverId, 'order:new_request', { orderId, expiresAt });
+
+    return request;
   }
 
   /**

@@ -9,6 +9,7 @@ import {
   ApplicationStatus,
   DeliveryRequestStatus,
   OrderStatus,
+  Role,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../gateway/realtime.gateway';

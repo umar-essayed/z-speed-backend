@@ -139,6 +139,18 @@ export class DriversController {
     return this.driversService.getMyOrders(userId, { status, page, limit });
   }
 
+  @Get(':userId/orders/active')
+  @Roles(Role.DRIVER)
+  async getActiveOrders(@Param('userId') userId: string) {
+    return this.driversService.getActiveOrders(userId);
+  }
+
+  @Get(':userId/orders/history')
+  @Roles(Role.DRIVER)
+  async getOrderHistory(@Param('userId') userId: string) {
+    return this.driversService.getOrderHistory(userId);
+  }
+
   @Get('earnings')
   @Roles(Role.DRIVER)
   async getEarnings(@CurrentUser('userId') userId: string) {

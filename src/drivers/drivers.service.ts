@@ -307,6 +307,45 @@ export class DriversService {
     };
   }
 
+  async getActiveOrders(userId: string) {
+    const profile = await this.getProfile(userId);
+    return this.prisma.order.findMany({
+      where: {
+        driverId: profile.id,
+        status: {
+          in: [
+            OrderStatus.CONFIRMED,
+            OrderStatus.PREPARING,
+            OrderStatus.READY,
+            OrderStatus.PICKED_UP,
+          ],
+        },
+      },
+      include: {
+        restaurant: true,
+        items: { include: { foodItem: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getOrderHistory(userId: string) {
+    const profile = await this.getProfile(userId);
+    return this.prisma.order.findMany({
+      where: {
+        driverId: profile.id,
+        status: {
+          in: [OrderStatus.DELIVERED, OrderStatus.CANCELLED],
+        },
+      },
+      include: {
+        restaurant: true,
+        items: { include: { foodItem: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
   /**
    * Get driver earnings summary.
    */

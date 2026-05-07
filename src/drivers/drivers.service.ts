@@ -390,6 +390,29 @@ export class DriversService {
     return scoredDrivers.map(sd => ({ driver: sd.driver, distance: sd.distance })).slice(0, 10);
   }
 
+  /**
+   * Get all currently available drivers (for vendors/admin).
+   */
+  async getAvailableDrivers() {
+    return this.prisma.driverProfile.findMany({
+      where: {
+        isAvailable: true,
+        applicationStatus: ApplicationStatus.APPROVED,
+      },
+      include: {
+        user: {
+          select: {
+            name: true,
+            phone: true,
+            profileImage: true,
+            email: true,
+          },
+        },
+        vehicle: true,
+      },
+    });
+  }
+
   // =============================================
   // HELPERS
   // =============================================

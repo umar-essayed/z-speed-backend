@@ -522,7 +522,18 @@ export class OrdersService {
             deliveryFee: order.deliveryFee,
             estimatedDistance: distance,
           },
-        }),
+        }).then(async (req) => {
+          // Sync to Firebase for the driver app
+          await this.firebaseSync.createDeliveryRequestInFirebase(driver.id, orderId, {
+            firebaseOrderId: order.firebaseOrderId,
+            deliveryFee: order.deliveryFee,
+            estimatedDistance: distance,
+            expiresAt,
+            restaurantName: order.restaurant.name,
+            deliveryAddress: order.deliveryAddress,
+          });
+          return req;
+        })
       ),
     );
 

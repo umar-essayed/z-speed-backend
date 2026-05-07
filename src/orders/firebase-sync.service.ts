@@ -73,9 +73,31 @@ export class FirebaseSyncService implements OnModuleInit {
       this.logger.error('Error listening to Firebase food items:', error);
     });
 
-    // 5. Trigger initial sync for existing restaurants
+    // 5. Listen for driver profiles and live locations
+    firestore.collection('driverProfiles').onSnapshot(async (snapshot) => {
+      for (const change of snapshot.docChanges()) {
+        await this.syncDriver(change.doc);
+      }
+    }, (error) => {
+      this.logger.error('Error listening to Firebase driver profiles:', error);
+    });
+
+    // 6. Listen for delivery request responses (Driver accepts/rejects)
+    firestore.collection('deliveryRequests').onSnapshot(async (snapshot) => {
+      for (const change of snapshot.docChanges()) {
+        const data = change.doc.data();
+        if (change.type === 'modified' && data.status === 'accepted') {
+          await this.handleDriverAcceptance(data);
+        }
+      }
+    }, (error) => {
+      this.logger.error('Error listening to Firebase delivery requests:', error);
+    });
+
+    // 7. Trigger initial syncs
     this.initialSyncRestaurants();
     this.initialSyncMenu();
+    this.initialSyncDrivers();
   }
 
   private async syncOrder(doc: any) {
@@ -406,6 +428,89 @@ export class FirebaseSyncService implements OnModuleInit {
     }
   }
 
+  // Sync Drivers FROM Firebase TO Postgres
+  private async syncDriver(doc: any) {
+    const data = doc.data();
+    const uid = doc.id; // Usually the UID
+    this.logger.log(`Syncing Firebase driver: ${data.name || uid}`);
+
+    try {
+      // 1. Resolve/Create User first
+      let user = await this.prisma.user.findFirst({
+        where: { firebaseUid: uid }
+      });
+
+      if (!user) {
+        // Fetch from Auth or create skeleton
+        try {
+          const authUser = await this.firebaseAdmin.getAuth().getUser(uid);
+          user = await this.prisma.user.create({
+            data: {
+              firebaseUid: uid,
+              email: authUser.email || `${uid}@driver.zspeed.com`,
+              name: authUser.displayName || data.name || 'Driver User',
+              phone: authUser.phoneNumber || data.phone || null,
+              role: 'DRIVER',
+            }
+          });
+        } catch (err) {
+          user = await this.prisma.user.create({
+            data: {
+              firebaseUid: uid,
+              email: data.email || `${uid}@driver.zspeed.com`,
+              name: data.name || 'Driver User',
+              role: 'DRIVER',
+              phone: data.phone || null,
+            }
+          });
+        }
+      }
+
+      // 2. Create or Update DriverProfile
+      await this.prisma.driverProfile.upsert({
+        where: { userId: user.id },
+        update: {
+          currentLat: data.lastLocation?.latitude || data.latitude || null,
+          currentLng: data.lastLocation?.longitude || data.longitude || null,
+          isAvailable: data.online === true || data.status === 'online',
+          rating: data.rating || 0,
+          totalTrips: data.totalTrips || 0,
+          lastPingAt: new Date(),
+        },
+        create: {
+          userId: user.id,
+          currentLat: data.lastLocation?.latitude || data.latitude || null,
+          currentLng: data.lastLocation?.longitude || data.longitude || null,
+          isAvailable: data.online === true || data.status === 'online',
+          rating: data.rating || 0,
+          totalTrips: data.totalTrips || 0,
+          lastPingAt: new Date(),
+        }
+      });
+
+      this.logger.log(`✅ Synced Driver: ${data.name || uid} | Online: ${data.online}`);
+
+    } catch (error) {
+      this.logger.error(`Error syncing driver ${uid}:`, error);
+    }
+  }
+
+  private async initialSyncDrivers() {
+    this.logger.log('Performing initial sync of all Firebase drivers...');
+    const firestore = this.firebaseAdmin.getFirestore();
+    if (!firestore) return;
+
+    try {
+      const snapshot = await firestore.collection('driverProfiles').get();
+      for (const doc of snapshot.docs) {
+        await this.syncDriver(doc);
+      }
+      this.logger.log(`✅ Initial driver sync completed: ${snapshot.size} drivers processed.`);
+    } catch (error) {
+      this.logger.error('Failed during initial driver sync:', error);
+    }
+  }
+
   // Initial sync for Menu (Sections and Items)
   private async initialSyncMenu() {
     this.logger.log('Performing initial sync of all Firebase menu sections and items...');
@@ -634,6 +739,121 @@ export class FirebaseSyncService implements OnModuleInit {
     } catch (error) {
       this.logger.error(`Failed to sync status to Firebase for Postgres Order ${postgresOrderId}:`, error);
       throw new Error(`Failed to sync status with Firebase: ${error.message}`);
+    }
+  }
+
+  // Handle driver acceptance from Firebase
+  private async handleDriverAcceptance(data: any) {
+    const { postgresOrderId, driverId: firebaseDriverUid } = data;
+    if (!postgresOrderId || !firebaseDriverUid) return;
+
+    this.logger.log(`Driver ${firebaseDriverUid} accepted order ${postgresOrderId}`);
+
+    try {
+      // 1. Find Postgres IDs
+      const driverUser = await this.prisma.user.findFirst({
+        where: { firebaseUid: firebaseDriverUid },
+        include: { driverProfile: true }
+      });
+
+      if (!driverUser || !driverUser.driverProfile) {
+        this.logger.error(`Could not find driver profile for Firebase UID: ${firebaseDriverUid}`);
+        return;
+      }
+
+      const driverProfileId = driverUser.driverProfile.id;
+
+      // 2. Check if order already has a driver
+      const existingOrder = await this.prisma.order.findUnique({
+        where: { id: postgresOrderId }
+      });
+
+      if (existingOrder?.driverId) {
+        this.logger.warn(`Order ${postgresOrderId} already assigned to driver ${existingOrder.driverId}. Rejecting late acceptance.`);
+        return;
+      }
+
+      // 3. Assign driver and update status in Postgres
+      const updatedOrder = await this.prisma.order.update({
+        where: { id: postgresOrderId },
+        data: {
+          driverId: driverProfileId,
+          status: OrderStatus.CONFIRMED,
+        },
+        include: {
+          driver: { include: { user: true } },
+          customer: true,
+          restaurant: true,
+        }
+      });
+
+      // 4. Update DeliveryRequest record in Postgres
+      await this.prisma.deliveryRequest.updateMany({
+        where: { 
+          orderId: postgresOrderId,
+          driverId: driverProfileId
+        },
+        data: { status: 'ACCEPTED' }
+      });
+
+      // 5. Cancel other delivery requests for this order
+      await this.prisma.deliveryRequest.updateMany({
+        where: {
+          orderId: postgresOrderId,
+          driverId: { not: driverProfileId },
+          status: 'PENDING'
+        },
+        data: { status: 'CANCELLED' }
+      });
+
+      // 6. Notify Vendor via Socket.io
+      this.gateway.emitToVendor(updatedOrder.restaurantId, 'order:status_changed', updatedOrder);
+      this.gateway.emitToVendor(updatedOrder.restaurantId, 'order:driver_assigned', {
+        orderId: updatedOrder.id,
+        driver: updatedOrder.driver
+      });
+
+      // 7. Update Firebase order status
+      await this.updateFirebaseOrderStatus(postgresOrderId, OrderStatus.CONFIRMED);
+
+      this.logger.log(`✅ Order ${postgresOrderId} successfully assigned to driver ${driverUser.name}`);
+
+    } catch (error) {
+      this.logger.error('Failed to handle driver acceptance:', error);
+    }
+  }
+
+  // Create Delivery Request in Firebase for a specific driver
+  async createDeliveryRequestInFirebase(driverId: string, orderId: string, data: any) {
+    const firestore = this.firebaseAdmin.getFirestore();
+    if (!firestore) return;
+
+    try {
+      // Find driver's firebaseUid
+      const driver = await this.prisma.driverProfile.findUnique({
+        where: { id: driverId },
+        include: { user: true }
+      });
+
+      if (!driver || !driver.user.firebaseUid) return;
+
+      const requestId = `${orderId}_${driverId}`;
+      await firestore.collection('deliveryRequests').doc(requestId).set({
+        orderId: data.firebaseOrderId || orderId,
+        postgresOrderId: orderId,
+        driverId: driver.user.firebaseUid,
+        status: 'pending',
+        deliveryFee: data.deliveryFee,
+        distance: data.estimatedDistance,
+        expiresAt: data.expiresAt,
+        createdAt: new Date(),
+        restaurantName: data.restaurantName,
+        deliveryAddress: data.deliveryAddress,
+      });
+
+      this.logger.log(`🚀 Delivery request created in Firebase for driver ${driver.user.firebaseUid}`);
+    } catch (error) {
+      this.logger.error('Failed to create delivery request in Firebase:', error);
     }
   }
 }

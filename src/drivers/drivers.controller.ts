@@ -19,11 +19,17 @@ import { ApplyDriverDto, UpdateLocationDto } from './dto';
 
 @Controller('drivers')
 @UseGuards(SuperTokensAuthGuard, RolesGuard)
-@Roles(Role.DRIVER)
 export class DriversController {
   constructor(private readonly driversService: DriversService) {}
 
+  @Get('available')
+  @Roles(Role.DRIVER, Role.VENDOR, Role.ADMIN)
+  async getAvailableDrivers() {
+    return this.driversService.getAvailableDrivers();
+  }
+
   @Post('apply')
+  @Roles(Role.DRIVER)
   async apply(
     @CurrentUser('userId') userId: string,
     @Body() dto: ApplyDriverDto,
@@ -32,6 +38,7 @@ export class DriversController {
   }
 
   @Patch('availability')
+  @Roles(Role.DRIVER)
   async toggleAvailability(
     @CurrentUser('userId') userId: string,
     @Body('isAvailable') isAvailable: boolean,
@@ -40,6 +47,7 @@ export class DriversController {
   }
 
   @Patch('location')
+  @Roles(Role.DRIVER)
   async updateLocation(
     @CurrentUser('userId') userId: string,
     @Body() dto: UpdateLocationDto,
@@ -48,11 +56,13 @@ export class DriversController {
   }
 
   @Get('delivery-requests')
+  @Roles(Role.DRIVER)
   async getDeliveryRequests(@CurrentUser('userId') userId: string) {
     return this.driversService.getDeliveryRequests(userId);
   }
 
   @Patch('delivery-requests/:id/accept')
+  @Roles(Role.DRIVER)
   async acceptRequest(
     @CurrentUser('userId') userId: string,
     @Param('id', ParseUUIDPipe) id: string,
@@ -61,6 +71,7 @@ export class DriversController {
   }
 
   @Patch('delivery-requests/:id/reject')
+  @Roles(Role.DRIVER)
   async rejectRequest(
     @CurrentUser('userId') userId: string,
     @Param('id', ParseUUIDPipe) id: string,
@@ -70,6 +81,7 @@ export class DriversController {
   }
 
   @Get('my-orders')
+  @Roles(Role.DRIVER)
   async getMyOrders(
     @CurrentUser('userId') userId: string,
     @Query('status') status?: OrderStatus,
@@ -80,6 +92,7 @@ export class DriversController {
   }
 
   @Get('earnings')
+  @Roles(Role.DRIVER)
   async getEarnings(@CurrentUser('userId') userId: string) {
     return this.driversService.getEarnings(userId);
   }

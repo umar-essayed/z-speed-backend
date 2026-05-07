@@ -151,4 +151,13 @@ export class VendorOrdersController {
   ) {
     return this.ordersService.updateStatus(id, dto, userId, role);
   }
+
+  @Post(':id/dispatch')
+  @Roles(Role.VENDOR, Role.ADMIN)
+  async manualDispatch(
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    await this.ordersService.assignDriversToOrder(id);
+    return { success: true, message: 'Dispatch process initiated' };
+  }
 }

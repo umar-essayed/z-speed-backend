@@ -39,6 +39,8 @@ async function cleanAndSync() {
     await prisma.pendingApproval.deleteMany({});
     await prisma.auditLog.deleteMany({});
     await prisma.orderDispute.deleteMany({});
+    await prisma.favorite.deleteMany({});
+    await prisma.userAction.deleteMany({});
     await prisma.order.deleteMany({});
     
     console.log('🧹 Cleaning core tables...');
@@ -94,7 +96,8 @@ async function cleanAndSync() {
           name: data.name || 'Unnamed',
           description: data.description || '',
           address: data.address || '',
-          logoUrl: data.image || data.imageUrl || '',
+          logoUrl: data.logoUrl || data.image || data.imageUrl || data.logo || '',
+          coverImageUrl: data.coverImageUrl || data.coverImage || data.image || data.imageUrl || '',
           rating: data.rating || 4.5,
           deliveryFee: data.deliveryFee || 0,
           firebaseId: firebaseId,
@@ -124,7 +127,7 @@ async function cleanAndSync() {
               name: iData.name,
               description: iData.description || '',
               price: Number(iData.price) || 0,
-              imageUrl: iData.image || iData.imageUrl || '',
+              imageUrl: iData.imageUrl || iData.image || iData.itemImage || '',
               firebaseId: iDoc.id,
               sectionId: section.id,
             }

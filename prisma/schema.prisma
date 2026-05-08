@@ -202,6 +202,10 @@ model DriverProfile {
   payoutMethod      String?
   payoutPhoneNumber String?
 
+  // Additional Documents
+  policeClearanceUrl String?
+  facePhotoUrl       String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -225,6 +229,7 @@ model Vehicle {
   color              String?
   registrationDocUrl String?
   insuranceDocUrl    String?
+  vehiclePhotoUrl    String?
 
   createdAt DateTime @default(now())
 

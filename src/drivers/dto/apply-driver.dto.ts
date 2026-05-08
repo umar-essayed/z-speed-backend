@@ -28,6 +28,14 @@ export class CreateVehicleDto {
   @IsString()
   @IsOptional()
   registrationDocUrl?: string;
+
+  @IsString()
+  @IsOptional()
+  insuranceDocUrl?: string;
+
+  @IsString()
+  @IsOptional()
+  vehiclePhotoUrl?: string;
 }
 
 export class ApplyDriverDto {
@@ -42,6 +50,14 @@ export class ApplyDriverDto {
   @IsString()
   @IsNotEmpty()
   driverLicenseUrl: string;
+
+  @IsString()
+  @IsOptional()
+  policeClearanceUrl?: string;
+
+  @IsString()
+  @IsOptional()
+  facePhotoUrl?: string;
 
   @IsString()
   @IsOptional()

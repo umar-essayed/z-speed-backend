@@ -48,6 +48,8 @@ export class DriversService {
         nationalId: dto.nationalId,
         nationalIdUrl: dto.nationalIdUrl,
         driverLicenseUrl: dto.driverLicenseUrl,
+        policeClearanceUrl: dto.policeClearanceUrl,
+        facePhotoUrl: dto.facePhotoUrl,
         payoutPhoneNumber: dto.payoutPhoneNumber,
         applicationStatus: ApplicationStatus.UNDER_REVIEW,
       },
@@ -66,6 +68,8 @@ export class DriversService {
           plateNumber: dto.vehicle.plateNumber,
           color: dto.vehicle.color,
           registrationDocUrl: dto.vehicle.registrationDocUrl,
+          insuranceDocUrl: dto.vehicle.insuranceDocUrl,
+          vehiclePhotoUrl: dto.vehicle.vehiclePhotoUrl,
         },
         update: {
           type: dto.vehicle.type,
@@ -75,6 +79,8 @@ export class DriversService {
           plateNumber: dto.vehicle.plateNumber,
           color: dto.vehicle.color,
           registrationDocUrl: dto.vehicle.registrationDocUrl,
+          insuranceDocUrl: dto.vehicle.insuranceDocUrl,
+          vehiclePhotoUrl: dto.vehicle.vehiclePhotoUrl,
         },
       });
     }

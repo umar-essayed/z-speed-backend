@@ -216,8 +216,10 @@ export class OrdersService {
 
     this.logger.log(`Order created: ${order.id} by customer ${customerId}`);
 
-    // Notify Vendor
-    await this.notifications.notifyVendor(dto.restaurantId, order.id);
+    // Notify Vendor (Backgrounded)
+    this.notifications.notifyVendor(dto.restaurantId, order.id).catch(err => 
+      this.logger.error(`Failed to notify vendor for order ${order.id}:`, err.stack)
+    );
     this.gateway.emitToVendor(dto.restaurantId, 'order:new', order);
 
     // 10. If card, initiate payment
@@ -464,8 +466,10 @@ export class OrdersService {
       include: { items: true, restaurant: true },
     });
 
-    // 3. Side effects: Notify Customer
-    await this.notifications.notifyCustomer(updated.customerId, dto.status, orderId);
+    // 3. Side effects: Notify Customer (Backgrounded)
+    this.notifications.notifyCustomer(updated.customerId, dto.status, orderId).catch(err => 
+      this.logger.error(`Failed to notify customer for order ${orderId}:`, err.stack)
+    );
     this.gateway.emitToCustomer(updated.customerId, 'order:status_changed', updated);
     this.gateway.emitToOrder(orderId, 'status_changed', { status: dto.status });
 
@@ -582,9 +586,9 @@ export class OrdersService {
             deliveryFee: order.deliveryFee,
             estimatedDistance: distance,
           },
-        }).then(async (req) => {
-          // Sync to Firebase for the driver app
-          await this.firebaseSync.createDeliveryRequestInFirebase(driver.id, orderId, {
+        }).then((req) => {
+          // Sync to Firebase for the driver app (Backgrounded to avoid timeout)
+          this.firebaseSync.createDeliveryRequestInFirebase(driver.id, orderId, {
             firebaseOrderId: order.firebaseOrderId,
             deliveryFee: order.deliveryFee,
             estimatedDistance: distance,
@@ -595,15 +599,19 @@ export class OrdersService {
             customerName: order.customer?.name || 'Customer',
             orderTotal: order.total,
             paymentMethod: order.paymentMethod,
-          });
+          }).catch(err => 
+            this.logger.error(`Failed to sync delivery request to Firebase for driver ${driver.id}:`, err.stack)
+          );
           return req;
         })
       ),
     );
 
-    // Notify drivers
+    // Notify drivers (Backgrounded)
     const driverUserIds = drivers.map(({ driver }) => driver.userId);
-    await this.notifications.notifyAvailableDrivers(driverUserIds, orderId);
+    this.notifications.notifyAvailableDrivers(driverUserIds, orderId).catch(err => 
+      this.logger.error(`Failed to notify drivers for order ${orderId}:`, err.stack)
+    );
     
     for (const { driver } of drivers) {
       this.gateway.emitToDriver(driver.id, 'order:new_request', {
@@ -686,8 +694,8 @@ export class OrdersService {
       },
     });
 
-    // Sync to Firebase
-    await this.firebaseSync.createDeliveryRequestInFirebase(driverId, orderId, {
+    // Sync to Firebase (Backgrounded to avoid 524 timeout)
+    this.firebaseSync.createDeliveryRequestInFirebase(driverId, orderId, {
       firebaseOrderId: order.firebaseOrderId,
       deliveryFee: order.deliveryFee,
       estimatedDistance: distance,
@@ -698,10 +706,14 @@ export class OrdersService {
       customerName: order.customer?.name || 'Customer',
       orderTotal: order.total,
       paymentMethod: order.paymentMethod,
-    });
+    }).catch(err => 
+      this.logger.error(`Failed to sync manual driver request to Firebase: ${err.message}`)
+    );
 
-    // Notify driver
-    await this.notifications.notifyAvailableDrivers([driver.userId], orderId);
+    // Notify driver (Backgrounded)
+    this.notifications.notifyAvailableDrivers([driver.userId], orderId).catch(err => 
+      this.logger.error(`Failed to notify specific driver: ${err.message}`)
+    );
     this.gateway.emitToDriver(driverId, 'order:new_request', { orderId, expiresAt });
 
     return request;

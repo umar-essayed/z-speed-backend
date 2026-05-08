@@ -12,25 +12,24 @@ import Redis from 'ioredis';
         const client = url 
           ? new Redis(url, {
               tls: url.startsWith('rediss://') ? {} : undefined,
-        const redisUrl = config.get('REDIS_URL');
-        const logger = new Logger('RedisModule');
+              maxRetriesPerRequest: 0,
+              enableOfflineQueue: false,
+            })
+          : new Redis({
+              host: config.get<string>('REDIS_HOST', 'localhost'),
+              port: config.get<number>('REDIS_PORT', 6379),
+              password: config.get<string>('REDIS_PASSWORD'),
+              maxRetriesPerRequest: 0,
+              enableOfflineQueue: false,
+            });
 
-        logger.log(`Connecting to Redis at ${redisUrl?.split('@')[1] || 'unknown host'}...`);
-
-        const client = new Redis(redisUrl, {
-          maxRetriesPerRequest: 0,
-          disableOfflineQueue: false,
-          reconnectOnError: (err) => {
-            const targetError = 'READONLY';
-            if (err.message.includes(targetError)) {
-              return true;
-            }
-            return false;
-          },
+        client.on('error', (err) => {
+          console.error('Redis Client Error:', err.message);
         });
 
-        client.on('connect', () => logger.log('Successfully connected to Redis.'));
-        client.on('error', (err) => logger.error('Redis Client Error:', err.message));
+        client.on('connect', () => {
+          console.log('Successfully connected to Redis');
+        });
 
         return client;
       },

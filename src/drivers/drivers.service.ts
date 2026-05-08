@@ -226,7 +226,6 @@ export class DriversService {
       where: { id: request.orderId },
       data: {
         driverId: profile.id,
-        status: OrderStatus.IN_PROGRESS,
         driverAssignedAt: new Date(),
       },
     });
@@ -251,10 +250,10 @@ export class DriversService {
 
     this.logger.log(`Driver ${profile.id} accepted request ${requestId}`);
 
-    // Notify Customer (Async)
+    // Notify Customer & Vendor (Async)
     const order = await this.prisma.order.findUnique({
       where: { id: request.orderId },
-      select: { customerId: true },
+      select: { customerId: true, restaurantId: true },
     });
     if (order) {
       this.notifications.notifyCustomer(
@@ -264,6 +263,11 @@ export class DriversService {
       ).catch(err => this.logger.error(`Failed to notify customer for order ${request.orderId}:`, err.stack));
       
       this.gateway.emitToCustomer(order.customerId, 'order:assigned', {
+        orderId: request.orderId,
+        driverId: profile.id,
+      });
+
+      this.gateway.emitToVendor(order.restaurantId, 'order:driver_assigned', {
         orderId: request.orderId,
         driverId: profile.id,
       });

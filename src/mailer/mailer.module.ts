@@ -14,7 +14,7 @@ import { MailerService } from './mailer.service';
       useFactory: (config: ConfigService) => ({
         transport: {
           host: config.get('MAIL_HOST'),
-          port: config.get('MAIL_PORT'),
+          port: parseInt(config.get('MAIL_PORT'), 10),
           secure: config.get('MAIL_SECURE') === 'true',
           auth: {
             user: config.get('MAIL_USER'),

@@ -12,35 +12,43 @@ import { MailerService } from './mailer.service';
     NestMailerModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        transport: {
-          host: config.get('MAIL_HOST'),
-          port: parseInt(config.get('MAIL_PORT') || '587', 10),
-          secure: config.get('MAIL_SECURE') === 'true',
-          auth: {
-            user: config.get('MAIL_USER'),
-            pass: config.get('MAIL_PASS'),
+      useFactory: (config: ConfigService) => {
+        const host = config.get('MAIL_HOST');
+        const port = config.get('MAIL_PORT');
+        const secure = config.get('MAIL_SECURE') === 'true';
+        const user = config.get('MAIL_USER');
+
+        console.log(`[MailerModule] Initializing with Host: ${host}, Port: ${port}, Secure: ${secure}, User: ${user}`);
+
+        return {
+          transport: {
+            host,
+            port: Number(port),
+            secure,
+            auth: {
+              user,
+              pass: config.get('MAIL_PASS'),
+            },
+            requireTLS: port == 587,
+            connectionTimeout: 20000, // Increased timeout
+            socketTimeout: 20000,
+            tls: {
+              rejectUnauthorized: false,
+              minVersion: 'TLSv1.2',
+            },
           },
-          connectionTimeout: 15000, // 15 seconds
-          greetingTimeout: 15000,
-          socketTimeout: 15000,
-          tls: {
-            rejectUnauthorized: false,
+          defaults: {
+            from: `"${config.get('MAIL_FROM_NAME') || 'Z-SPEED'}" <${config.get('MAIL_FROM') || user}>`,
           },
-        },
-        defaults: {
-          from: `"Z-Speed" <${config.get('MAIL_FROM')}>`,
-        },
-        template: {
-          dir: existsSync(join(__dirname, 'templates'))
-            ? join(__dirname, 'templates')
-            : join(process.cwd(), 'dist', 'mailer', 'templates'),
-          adapter: new HandlebarsAdapter(),
-          options: {
-            strict: false,
+          template: {
+            dir: join(process.cwd(), 'dist', 'src', 'mailer', 'templates'),
+            adapter: new HandlebarsAdapter(),
+            options: {
+              strict: true,
+            },
           },
-        },
-      }),
+        };
+      },
     }),
   ],
   providers: [MailerService],

@@ -98,10 +98,7 @@ export class FirebaseSyncService implements OnModuleInit {
       this.logger.error('Error listening to Firebase delivery requests:', error);
     });
 
-    // 7. Trigger initial syncs
-    this.initialSyncRestaurants();
-    this.initialSyncMenu();
-    this.initialSyncDrivers();
+    // 7. Initial syncs are handled automatically by onSnapshot when it first attaches
   }
 
   private async syncOrder(doc: any) {
@@ -218,7 +215,7 @@ export class FirebaseSyncService implements OnModuleInit {
         }
       });
 
-      this.logger.log(`✅ Successfully synced Firebase order ${doc.id} -> Postgres Order ${order.id}`);
+      this.logger.debug(`✅ Successfully synced Firebase order ${doc.id} -> Postgres Order ${order.id}`);
 
       // 5. Broadcast to Dashboard
       this.gateway.emitToVendor(restaurantId, 'order:new', order);
@@ -325,7 +322,7 @@ export class FirebaseSyncService implements OnModuleInit {
         }
       });
 
-      this.logger.log(`✅ Synced Restaurant: ${data.name || doc.id}`);
+      this.logger.debug(`✅ Synced Restaurant: ${data.name || doc.id}`);
 
     } catch (error) {
       this.logger.error(`Error syncing restaurant ${doc.id}:`, error);
@@ -384,7 +381,7 @@ export class FirebaseSyncService implements OnModuleInit {
         }
       });
 
-      this.logger.log(`✅ Synced Menu Section: ${data.name || doc.id} for Restaurant ${restaurant.name}`);
+      this.logger.debug(`✅ Synced Menu Section: ${data.name || doc.id} for Restaurant ${restaurant.name}`);
     } catch (error) {
       this.logger.error(`Error syncing menu section ${doc.id}:`, error);
     }
@@ -435,7 +432,7 @@ export class FirebaseSyncService implements OnModuleInit {
         }
       });
 
-      this.logger.log(`✅ Synced Food Item: ${data.name || doc.id} in Section ${section.name}`);
+      this.logger.debug(`✅ Synced Food Item: ${data.name || doc.id} in Section ${section.name}`);
     } catch (error) {
       this.logger.error(`Error syncing food item ${doc.id}:`, error);
     }
@@ -533,7 +530,7 @@ export class FirebaseSyncService implements OnModuleInit {
         });
       }
 
-      this.logger.log(`✅ Synced Driver: ${userData.name} | Online: ${isOnline}`);
+      this.logger.debug(`✅ Synced Driver: ${userData.name} | Online: ${isOnline}`);
 
     } catch (error) {
       this.logger.error(`Error syncing driver ${uid}:`, error);

@@ -140,15 +140,20 @@ export class AuthService {
       throw new UnauthorizedException('البريد الإلكتروني أو كلمة المرور غير صحيحة');
     }
 
-    // Find user in our DB
-    const user = await this.prisma.user.findUnique({
-      where: { email: dto.email },
+    // Find user in our DB by email OR supabaseId
+    let user = await this.prisma.user.findFirst({
+      where: {
+        OR: [
+          { email: dto.email },
+          { supabaseId: data.user.id },
+        ],
+      },
       include: { driverProfile: true },
     });
 
     if (!user) {
-      // Edge case: user exists in Supabase but not in our DB — sync them
-      const newUser = await this.prisma.user.create({
+      // User doesn't exist in our DB — create them
+      user = await this.prisma.user.create({
         data: {
           supabaseId: data.user.id,
           email: dto.email,
@@ -160,24 +165,22 @@ export class AuthService {
         },
         include: { driverProfile: true },
       });
-      const tokens = this.generateTokens(newUser);
-      return {
-        message: 'تم تسجيل الدخول بنجاح',
-        user: this.formatUser(newUser),
-        ...tokens,
-      };
+    } else {
+      // User exists — ensure both email and supabaseId are up to date
+      if (user.email !== dto.email || user.supabaseId !== data.user.id) {
+        user = await this.prisma.user.update({
+          where: { id: user.id },
+          data: {
+            email: dto.email,
+            supabaseId: data.user.id,
+          },
+          include: { driverProfile: true },
+        });
+      }
     }
 
     if (user.status === AccountStatus.BANNED) {
       throw new UnauthorizedException('تم حظر هذا الحساب');
-    }
-
-    // Ensure supabaseId is synced
-    if (!user.supabaseId) {
-      await this.prisma.user.update({
-        where: { id: user.id },
-        data: { supabaseId: data.user.id },
-      });
     }
 
     const tokens = this.generateTokens(user);
@@ -266,31 +269,49 @@ export class AuthService {
     }
 
     // Sync / Create in our local DB
-    const isNew = !existingUser;
-    const user = await this.prisma.user.upsert({
-      where: { email },
-      update: {
-        supabaseId: supabaseUserId,
-        googleId: provider === 'google' ? externalId : undefined,
-        appleId: provider === 'apple' ? externalId : undefined,
-        name: name || undefined,
-        profileImage: profileImage || undefined,
-        authProvider: provider,
-      },
-      create: {
-        supabaseId: supabaseUserId,
-        email,
-        name: name || 'User',
-        role: dto.role ?? Role.CUSTOMER,
-        status: AccountStatus.ACTIVE,
-        emailVerified: true,
-        authProvider: provider,
-        googleId: provider === 'google' ? externalId : undefined,
-        appleId: provider === 'apple' ? externalId : undefined,
-        profileImage,
+    let user = await this.prisma.user.findFirst({
+      where: {
+        OR: [
+          { email },
+          { supabaseId: supabaseUserId },
+        ],
       },
       include: { driverProfile: true },
     });
+
+    const isNew = !user;
+
+    if (!user) {
+      user = await this.prisma.user.create({
+        data: {
+          supabaseId: supabaseUserId,
+          email,
+          name: name || 'User',
+          role: dto.role ?? Role.CUSTOMER,
+          status: AccountStatus.ACTIVE,
+          emailVerified: true,
+          authProvider: provider,
+          googleId: provider === 'google' ? externalId : undefined,
+          appleId: provider === 'apple' ? externalId : undefined,
+          profileImage,
+        },
+        include: { driverProfile: true },
+      });
+    } else {
+      user = await this.prisma.user.update({
+        where: { id: user.id },
+        data: {
+          email, // Update email in case it changed at provider
+          supabaseId: supabaseUserId,
+          googleId: provider === 'google' ? externalId : user.googleId,
+          appleId: provider === 'apple' ? externalId : user.appleId,
+          name: name || user.name,
+          profileImage: profileImage || user.profileImage,
+          authProvider: provider,
+        },
+        include: { driverProfile: true },
+      });
+    }
 
     const tokens = this.generateTokens(user);
 
@@ -366,8 +387,16 @@ export class AuthService {
       throw new UnauthorizedException('No email provided by OAuth provider');
     }
 
-    // Try to find an existing user or create a new one
-    let user = await this.prisma.user.findUnique({ where: { email } });
+    // Try to find an existing user or create a new one (Lookup by email OR supabaseId)
+    let user = await this.prisma.user.findFirst({
+      where: {
+        OR: [
+          { email },
+          { supabaseId: sbUser.id },
+        ],
+      },
+      include: { driverProfile: true },
+    });
 
     if (!user) {
       // Create the user in our DB if they don't exist
@@ -382,11 +411,15 @@ export class AuthService {
         },
         include: { driverProfile: true },
       });
-    } else if (!user.supabaseId) {
-      // Link the existing user to this Supabase ID
+    } else {
+      // Update existing user in case email/id changed
       user = await this.prisma.user.update({
         where: { id: user.id },
-        data: { supabaseId: sbUser.id },
+        data: {
+          email,
+          supabaseId: sbUser.id,
+          name: name || user.name,
+        },
         include: { driverProfile: true },
       });
     }

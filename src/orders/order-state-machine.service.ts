@@ -36,9 +36,13 @@ export class OrderStateMachineService {
       case OrderStatus.CONFIRMED:
       case OrderStatus.PREPARING:
       case OrderStatus.READY:
+      case OrderStatus.READY_FOR_PICKUP:
         // Only VENDOR or ADMIN
         return ([Role.VENDOR, Role.ADMIN, Role.SUPERADMIN] as Role[]).includes(userRole);
 
+      case OrderStatus.PICKED_UP:
+      case OrderStatus.IN_TRANSIT:
+      case OrderStatus.ARRIVED:
       case OrderStatus.IN_PROGRESS:
       case OrderStatus.OUT_FOR_DELIVERY:
       case OrderStatus.DELIVERED:
@@ -55,6 +59,7 @@ export class OrderStateMachineService {
         ] as Role[]).includes(userRole);
 
       default:
+        // Any other state transitions (if any) are not allowed by default
         return false;
     }
   }

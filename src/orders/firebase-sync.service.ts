@@ -215,7 +215,7 @@ export class FirebaseSyncService implements OnModuleInit {
         }
       });
 
-      this.logger.debug(`✅ Successfully synced Firebase order ${doc.id} -> Postgres Order ${order.id}`);
+      // Success log removed to prevent spam
 
       // 5. Broadcast to Dashboard
       this.gateway.emitToVendor(restaurantId, 'order:new', order);
@@ -322,7 +322,7 @@ export class FirebaseSyncService implements OnModuleInit {
         }
       });
 
-      this.logger.debug(`✅ Synced Restaurant: ${data.name || doc.id}`);
+      // Success log removed to prevent spam
 
     } catch (error) {
       this.logger.error(`Error syncing restaurant ${doc.id}:`, error);
@@ -381,7 +381,7 @@ export class FirebaseSyncService implements OnModuleInit {
         }
       });
 
-      this.logger.debug(`✅ Synced Menu Section: ${data.name || doc.id} for Restaurant ${restaurant.name}`);
+      // Success log removed to prevent spam
     } catch (error) {
       this.logger.error(`Error syncing menu section ${doc.id}:`, error);
     }
@@ -432,7 +432,7 @@ export class FirebaseSyncService implements OnModuleInit {
         }
       });
 
-      this.logger.debug(`✅ Synced Food Item: ${data.name || doc.id} in Section ${section.name}`);
+      // Success log removed to prevent spam
     } catch (error) {
       this.logger.error(`Error syncing food item ${doc.id}:`, error);
     }
@@ -530,7 +530,7 @@ export class FirebaseSyncService implements OnModuleInit {
         });
       }
 
-      this.logger.debug(`✅ Synced Driver: ${userData.name} | Online: ${isOnline}`);
+      // Success log removed to prevent spam
 
     } catch (error) {
       this.logger.error(`Error syncing driver ${uid}:`, error);

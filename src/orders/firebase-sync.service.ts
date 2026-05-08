@@ -188,8 +188,18 @@ export class FirebaseSyncService implements OnModuleInit {
       }
 
       // 4. Create Order in PostgreSQL
-      const order = await this.prisma.order.create({
-        data: {
+      // 4. Create or Update Order in PostgreSQL
+      const order = await this.prisma.order.upsert({
+        where: { firebaseOrderId: doc.id },
+        update: {
+          status: this.mapFirebaseToPostgresStatus(data.status) || OrderStatus.PENDING,
+          subtotal: data.subtotal || data.total || 0,
+          total: data.total || 0,
+          paymentState: data.paymentState === 'paid' ? PaymentState.PAID : PaymentState.PENDING,
+          deliveryAddress: data.deliveryAddress || 'Synced Address',
+          updatedAt: new Date(),
+        },
+        create: {
           customerId,
           restaurantId,
           firebaseOrderId: doc.id,
@@ -261,8 +271,13 @@ export class FirebaseSyncService implements OnModuleInit {
         try {
           const authUser = await this.firebaseAdmin.getAuth().getUser(firebaseOwnerId);
           if (authUser) {
-            user = await this.prisma.user.create({
-              data: {
+            user = await this.prisma.user.upsert({
+              where: { firebaseUid: authUser.uid },
+              update: {
+                name: authUser.displayName || data.name || 'Vendor User',
+                phone: authUser.phoneNumber || data.phone || null,
+              },
+              create: {
                 firebaseUid: authUser.uid,
                 email: authUser.email || `${authUser.uid}@vendor.zspeed.com`,
                 name: authUser.displayName || data.name || 'Vendor User',
@@ -270,19 +285,23 @@ export class FirebaseSyncService implements OnModuleInit {
                 role: 'VENDOR',
               }
             });
-            this.logger.log(`Created Vendor User in Postgres: ${user.id}`);
+            this.logger.log(`Synced Vendor User in Postgres: ${user.id}`);
           }
         } catch (err) {
-          // If not in Auth, create a skeleton user
-          user = await this.prisma.user.create({
-            data: {
+          // If not in Auth, create/update a skeleton user
+          user = await this.prisma.user.upsert({
+            where: { firebaseUid: firebaseOwnerId },
+            update: {
+              name: data.name || 'Vendor User',
+            },
+            create: {
               firebaseUid: firebaseOwnerId,
               email: `${firebaseOwnerId}@vendor.zspeed.com`,
               name: data.name || 'Vendor User',
               role: 'VENDOR',
             }
           });
-          this.logger.log(`Created Skeleton Vendor User in Postgres: ${user.id}`);
+          this.logger.log(`Synced Skeleton Vendor User in Postgres: ${user.id}`);
         }
       }
 

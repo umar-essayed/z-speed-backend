@@ -482,10 +482,16 @@ export class AuthService {
     const code = await this.otpService.sendOtp(email);
 
     // Send real email if SMTP is configured, otherwise log to console in dev
-    if (this.configService.get('MAIL_HOST')) {
-      await this.mailerService.sendOtpEmail(email, code);
-    } else if (this.configService.get<string>('NODE_ENV') === 'development') {
+    if (this.configService.get<string>('NODE_ENV') === 'development') {
       this.logger.warn(`[DEV MODE] Email OTP for ${email}: ${code} (use 123456 as master code)`);
+    }
+
+    if (this.configService.get('MAIL_HOST')) {
+      try {
+        await this.mailerService.sendOtpEmail(email, code);
+      } catch (err) {
+        this.logger.error(`Failed to send OTP email to ${email}: ${err.message}`);
+      }
     }
 
     return { message: 'تم إرسال رمز التحقق إلى البريد الإلكتروني' };

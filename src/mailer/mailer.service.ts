@@ -12,7 +12,7 @@ export class MailerService {
       await this.mailerService.sendMail({
         to,
         subject: 'Welcome to Z-Speed!',
-        template: './welcome',
+        template: 'welcome',
         context: {
           name,
         },
@@ -28,7 +28,7 @@ export class MailerService {
       await this.mailerService.sendMail({
         to,
         subject: 'Z-Speed - Password Reset Request',
-        template: './reset-password',
+        template: 'reset-password',
         context: {
           resetLink,
         },
@@ -46,7 +46,7 @@ export class MailerService {
       await this.mailerService.sendMail({
         to,
         subject: 'Z-Speed - Verification Code',
-        template: './otp',
+        template: 'otp',
         context: {
           code,
         },

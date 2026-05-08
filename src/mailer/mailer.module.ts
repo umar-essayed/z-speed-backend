@@ -3,6 +3,7 @@ import { MailerModule as NestMailerModule } from '@nestjs-modules/mailer';
 import { HandlebarsAdapter } from '@nestjs-modules/mailer/adapters/handlebars.adapter';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { join } from 'path';
+import { existsSync } from 'fs';
 import { MailerService } from './mailer.service';
 
 @Global()
@@ -28,10 +29,12 @@ import { MailerService } from './mailer.service';
           from: `"Z-Speed" <${config.get('MAIL_FROM')}>`,
         },
         template: {
-          dir: join(__dirname, 'templates'),
+          dir: existsSync(join(__dirname, 'templates'))
+            ? join(__dirname, 'templates')
+            : join(process.cwd(), 'dist', 'mailer', 'templates'),
           adapter: new HandlebarsAdapter(),
           options: {
-            strict: true,
+            strict: false,
           },
         },
       }),

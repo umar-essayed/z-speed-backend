@@ -12,13 +12,15 @@ import Redis from 'ioredis';
         const client = url 
           ? new Redis(url, {
               tls: url.startsWith('rediss://') ? {} : undefined,
-              maxRetriesPerRequest: null,
+              maxRetriesPerRequest: 0,
+              enableOfflineQueue: false,
             })
           : new Redis({
               host: config.get<string>('REDIS_HOST', 'localhost'),
               port: config.get<number>('REDIS_PORT', 6379),
               password: config.get<string>('REDIS_PASSWORD'),
-              maxRetriesPerRequest: null,
+              maxRetriesPerRequest: 0,
+              enableOfflineQueue: false,
             });
 
         client.on('error', (err) => {

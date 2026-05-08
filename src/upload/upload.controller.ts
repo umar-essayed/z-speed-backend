@@ -20,11 +20,12 @@ export class UploadController {
   @UseInterceptors(
     FileInterceptor('file', {
       limits: {
-        fileSize: 5 * 1024 * 1024, // 5 MB limit
+        fileSize: 10 * 1024 * 1024, // 10 MB limit
       },
       fileFilter: (req, file, cb) => {
-        if (!file.mimetype.match(/^image\/(jpg|jpeg|png|gif|webp)$/)) {
-          return cb(new BadRequestException('Only image files are allowed!'), false);
+        if (!file.mimetype.match(/^image\/(jpg|jpeg|png|gif|webp|heic|heif)$/) && 
+            file.mimetype !== 'application/pdf') {
+          return cb(new BadRequestException('Only images and PDF files are allowed!'), false);
         }
         cb(null, true);
       },

@@ -21,9 +21,12 @@ import { MailerService } from './mailer.service';
             user: config.get('MAIL_USER'),
             pass: config.get('MAIL_PASS'),
           },
-          connectionTimeout: 5000, // 5 seconds
-          greetingTimeout: 5000,
-          socketTimeout: 5000,
+          connectionTimeout: 15000, // 15 seconds
+          greetingTimeout: 15000,
+          socketTimeout: 15000,
+          tls: {
+            rejectUnauthorized: false,
+          },
         },
         defaults: {
           from: `"Z-Speed" <${config.get('MAIL_FROM')}>`,

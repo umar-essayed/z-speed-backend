@@ -14,7 +14,7 @@ export class OrderStateMachineService {
     [OrderStatus.READY_FOR_PICKUP]: [OrderStatus.PICKED_UP],
     [OrderStatus.PICKED_UP]: [OrderStatus.ARRIVED, OrderStatus.IN_PROGRESS],
     [OrderStatus.ARRIVED]: [OrderStatus.DELIVERED],
-    [OrderStatus.IN_PROGRESS]: [OrderStatus.OUT_FOR_DELIVERY, OrderStatus.CANCELLED],
+    [OrderStatus.IN_PROGRESS]: [OrderStatus.OUT_FOR_DELIVERY, OrderStatus.DELIVERED, OrderStatus.ARRIVED, OrderStatus.CANCELLED],
     [OrderStatus.OUT_FOR_DELIVERY]: [OrderStatus.DELIVERED, OrderStatus.ARRIVED, OrderStatus.CANCELLED],
     [OrderStatus.IN_TRANSIT]: [OrderStatus.ARRIVED, OrderStatus.DELIVERED, OrderStatus.RETURNED],
     [OrderStatus.RETURNED]: [],

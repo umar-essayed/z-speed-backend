@@ -54,7 +54,7 @@ export class MailerService {
       this.logger.log(`OTP email sent to ${to}`);
     } catch (error) {
       this.logger.error(`Failed to send OTP email to ${to}: ${error.message}`);
-      // Don't rethrow, let the service continue (or return false if needed)
+      throw error;
     }
   }
 }

@@ -491,6 +491,7 @@ export class AuthService {
         await this.mailerService.sendOtpEmail(email, code);
       } catch (err) {
         this.logger.error(`Failed to send OTP email to ${email}: ${err.message}`);
+        throw new InternalServerErrorException('فشل إرسال البريد الإلكتروني. يرجى التحقق من إعدادات SMTP.');
       }
     }
 

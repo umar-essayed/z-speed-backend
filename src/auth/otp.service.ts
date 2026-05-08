@@ -25,7 +25,11 @@ export class OtpService {
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     
     // Store in Redis with 5 minutes expiration
-    await this.redis.set(`otp:${identifier}`, code, 'EX', 300);
+    try {
+      await this.redis.set(`otp:${identifier}`, code, 'EX', 300);
+    } catch (error) {
+      this.logger.error(`Failed to store OTP in Redis: ${error.message}. Continuing in memory/dev mode.`);
+    }
 
     if (this.isDevMode) {
       this.logger.warn(`[DEV MODE] OTP for ${identifier} is: ${code} (use 123456 as master code)`);
@@ -52,11 +56,16 @@ export class OtpService {
       return true;
     }
 
-    const cachedCode = await this.redis.get(`otp:${identifier}`);
-    
-    if (cachedCode && cachedCode === code) {
-      await this.redis.del(`otp:${identifier}`);
-      return true;
+    let cachedCode: string | null = null;
+    try {
+      cachedCode = await this.redis.get(`otp:${identifier}`);
+      
+      if (cachedCode && cachedCode === code) {
+        await this.redis.del(`otp:${identifier}`);
+        return true;
+      }
+    } catch (error) {
+      this.logger.error(`Failed to get OTP from Redis: ${error.message}`);
     }
 
     if (!this.isDevMode) {

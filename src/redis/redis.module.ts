@@ -9,18 +9,27 @@ import Redis from 'ioredis';
       provide: 'REDIS_CLIENT',
       useFactory: (config: ConfigService) => {
         const url = config.get<string>('REDIS_URL');
-        if (url) {
-          return new Redis(url, {
-            tls: url.startsWith('rediss://') ? {} : undefined,
-            maxRetriesPerRequest: null,
-          });
-        }
-        return new Redis({
-          host: config.get<string>('REDIS_HOST', 'localhost'),
-          port: config.get<number>('REDIS_PORT', 6379),
-          password: config.get<string>('REDIS_PASSWORD'),
-          maxRetriesPerRequest: null,
+        const client = url 
+          ? new Redis(url, {
+              tls: url.startsWith('rediss://') ? {} : undefined,
+              maxRetriesPerRequest: null,
+            })
+          : new Redis({
+              host: config.get<string>('REDIS_HOST', 'localhost'),
+              port: config.get<number>('REDIS_PORT', 6379),
+              password: config.get<string>('REDIS_PASSWORD'),
+              maxRetriesPerRequest: null,
+            });
+
+        client.on('error', (err) => {
+          console.error('Redis Client Error:', err.message);
         });
+
+        client.on('connect', () => {
+          console.log('Successfully connected to Redis');
+        });
+
+        return client;
       },
       inject: [ConfigService],
     },

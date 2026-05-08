@@ -23,8 +23,14 @@ import Redis from 'ioredis';
               enableOfflineQueue: false,
             });
 
+        const loggedErrors = new Set<string>();
         client.on('error', (err) => {
-          console.error('Redis Client Error:', err.message);
+          if (!loggedErrors.has(err.message)) {
+            console.warn('Redis Client Error (throttled):', err.message);
+            loggedErrors.add(err.message);
+            // Clear from set after 1 minute to allow re-logging if problem persists
+            setTimeout(() => loggedErrors.delete(err.message), 60000);
+          }
         });
 
         client.on('connect', () => {

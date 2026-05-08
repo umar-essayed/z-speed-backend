@@ -38,12 +38,15 @@ export class FirebaseSyncService implements OnModuleInit {
       for (const change of snapshot.docChanges()) {
         const data = change.doc.data();
         
-        if (change.type === 'added' || (change.type === 'modified' && !data.syncedToPostgres)) {
-          // Sync any new/unsynced order regardless of status
-          await this.syncOrder(change.doc);
-        } else if (change.type === 'modified' && data.syncedToPostgres && data.postgresOrderId) {
-          // Order already exists in Postgres, sync updates from Firebase (Driver/Customer actions)
-          await this.syncStatusFromFirebase(change.doc);
+        if (change.type === 'added') {
+          // Silent sync for initial load or new docs already marked synced
+          await this.syncOrder(change.doc, data.syncedToPostgres);
+        } else if (change.type === 'modified') {
+          if (!data.syncedToPostgres) {
+            await this.syncOrder(change.doc, false);
+          } else if (data.postgresOrderId) {
+            await this.syncStatusFromFirebase(change.doc);
+          }
         }
       }
     }, (error) => {
@@ -101,10 +104,12 @@ export class FirebaseSyncService implements OnModuleInit {
     // 7. Initial syncs are handled automatically by onSnapshot when it first attaches
   }
 
-  private async syncOrder(doc: any) {
+  private async syncOrder(doc: any, silent = false) {
     try {
       const data = doc.data();
-      this.logger.log(`Syncing Firebase order: ${doc.id}`);
+      if (!silent) {
+        this.logger.log(`Syncing Firebase order: ${doc.id}`);
+      }
 
       // 1. Resolve Customer
       let customerId: string | null = null;
@@ -250,10 +255,14 @@ export class FirebaseSyncService implements OnModuleInit {
     }
   }
 
-  // Sync Restaurants (Vendors) FROM Firebase TO Postgres
   private async syncRestaurant(doc: any) {
     const data = doc.data();
-    this.logger.log(`Syncing Firebase restaurant: ${data.name || doc.id}`);
+    // Use a flag to avoid redundant logs for already synced restaurants
+    const silent = !!data.postgresId; // If we ever add this field to FB
+    
+    if (!silent) {
+      this.logger.debug(`Checking Firebase restaurant: ${data.name || doc.id}`);
+    }
 
     try {
       // 1. Resolve Owner (Vendor User)
@@ -378,7 +387,8 @@ export class FirebaseSyncService implements OnModuleInit {
       });
 
       if (!restaurant) {
-        this.logger.warn(`Skip sync section ${doc.id}: Restaurant ${fbRestaurantId} not found in Postgres`);
+        // Only warn if the restaurant is actually missing (not just a quiet skip)
+        // this.logger.warn(`Skip sync section ${doc.id}: Restaurant ${fbRestaurantId} not found in Postgres`);
         return;
       }
 
@@ -419,7 +429,8 @@ export class FirebaseSyncService implements OnModuleInit {
       });
 
       if (!section) {
-        this.logger.warn(`Skip sync item ${doc.id}: Section ${fbSectionId} not found in Postgres`);
+        // Only warn if the section is actually missing
+        // this.logger.warn(`Skip sync item ${doc.id}: Section ${fbSectionId} not found in Postgres`);
         return;
       }
 

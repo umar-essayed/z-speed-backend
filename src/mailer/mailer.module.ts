@@ -41,7 +41,19 @@ import { MailerService } from './mailer.service';
             from: `"${config.get('MAIL_FROM_NAME') || 'Z-SPEED'}" <${config.get('MAIL_FROM') || user}>`,
           },
           template: {
-            dir: join(process.cwd(), 'dist', 'src', 'mailer', 'templates'),
+            dir: (() => {
+              const paths = [
+                join(__dirname, 'templates'),
+                join(process.cwd(), 'dist', 'mailer', 'templates'),
+                join(process.cwd(), 'src', 'mailer', 'templates'),
+                join(process.cwd(), 'dist', 'src', 'mailer', 'templates'),
+              ];
+              const found = paths.find((p) => existsSync(p));
+              if (!found) {
+                console.error(`[MailerModule] No template directory found! Tried: ${paths.join(', ')}`);
+              }
+              return found || paths[0];
+            })(),
             adapter: new HandlebarsAdapter(),
             options: {
               strict: true,

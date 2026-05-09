@@ -25,6 +25,7 @@ import {
   PhoneVerifyOtpDto,
   DebugLoginDto,
 } from './dto/auth.dto';
+import { FirebaseAdminService } from '../firebase/firebase-admin.service';
 
 @Injectable()
 export class AuthService {
@@ -39,6 +40,7 @@ export class AuthService {
     private readonly supabaseService: SupabaseService,
     private readonly jwtService: JwtService,
     private readonly mailerService: MailerService,
+    private readonly firebaseAdmin: FirebaseAdminService,
   ) {
     this.googleClient = new OAuth2Client(
       this.configService.get<string>('GOOGLE_CLIENT_ID'),
@@ -116,6 +118,31 @@ export class AuthService {
       },
       include: { driverProfile: true },
     });
+
+    // Sync to Firebase if Vendor or Driver
+    if (user.role === Role.VENDOR || user.role === Role.DRIVER) {
+      try {
+        const auth = this.firebaseAdmin.getAuth();
+        if (auth) {
+          const fbUser = await auth.createUser({
+            email: dto.email,
+            password: dto.password,
+            displayName: dto.name,
+          });
+          await auth.setCustomUserClaims(fbUser.uid, {
+            role: user.role,
+            postgresId: user.id,
+          });
+          await this.prisma.user.update({
+            where: { id: user.id },
+            data: { firebaseUid: fbUser.uid },
+          });
+          this.logger.log(`Synced new ${user.role} to Firebase Auth: ${fbUser.uid}`);
+        }
+      } catch (err) {
+        this.logger.error(`Failed to sync new user to Firebase: ${err}`);
+      }
+    }
 
     const tokens = this.generateTokens(user);
 

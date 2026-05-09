@@ -1,10 +1,14 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Role, ApplicationStatus } from '@prisma/client';
+import { FirebaseAdminService } from '../firebase/firebase-admin.service';
 
 @Injectable()
 export class OnboardingService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private firebaseAdmin: FirebaseAdminService,
+  ) {}
 
   async submitDriverApplication(userId: string, data: any) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
@@ -110,7 +114,10 @@ export class OnboardingService {
         });
       }
 
-      // 3. Log the action
+      // 3. Sync to Firebase
+      await this.syncToFirebase(targetUserId);
+
+      // 4. Log the action
       await tx.auditLog.create({
         data: {
           userId: reviewerId,
@@ -161,5 +168,96 @@ export class OnboardingService {
 
       return { success: true, message: 'Application rejected' };
     });
+  }
+
+  private async syncToFirebase(userId: string) {
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        include: { ownedRestaurants: true },
+      });
+
+      if (!user) return;
+
+      const auth = this.firebaseAdmin.getAuth();
+      const firestore = this.firebaseAdmin.getFirestore();
+      if (!auth || !firestore) return;
+
+      // 1. Sync User to Firebase Auth
+      let firebaseUid = user.firebaseUid;
+      try {
+        let fbUser;
+        if (firebaseUid) {
+          fbUser = await auth.getUser(firebaseUid);
+        } else {
+          fbUser = await auth.getUserByEmail(user.email);
+          firebaseUid = fbUser.uid;
+        }
+
+        // Update custom claims
+        await auth.setCustomUserClaims(firebaseUid, {
+          role: user.role,
+          postgresId: user.id,
+        });
+
+        if (!user.firebaseUid) {
+          await this.prisma.user.update({
+            where: { id: user.id },
+            data: { firebaseUid },
+          });
+        }
+      } catch (error: any) {
+        if (error.code === 'auth/user-not-found') {
+          // Create user if not exists
+          const newFbUser = await auth.createUser({
+            email: user.email,
+            displayName: user.name,
+            phoneNumber: user.phone || undefined,
+            // We don't have the plain text password here usually, 
+            // but for new ones they might need to reset or we use a default
+          });
+          firebaseUid = newFbUser.uid;
+          await auth.setCustomUserClaims(firebaseUid, {
+            role: user.role,
+            postgresId: user.id,
+          });
+          await this.prisma.user.update({
+            where: { id: user.id },
+            data: { firebaseUid },
+          });
+        }
+      }
+
+      // 2. Sync Restaurants to Firestore
+      for (const restaurant of user.ownedRestaurants) {
+        const fbId = restaurant.firebaseId || restaurant.id;
+        await firestore.collection('restaurants').doc(fbId).set({
+          ownerId: user.id,
+          name: restaurant.name,
+          nameAr: restaurant.nameAr,
+          description: restaurant.description,
+          logoUrl: restaurant.logoUrl,
+          coverImageUrl: restaurant.coverImageUrl,
+          status: restaurant.status,
+          isActive: restaurant.isActive,
+          isOpen: restaurant.isOpen,
+          vendorType: restaurant.vendorType,
+          address: restaurant.address,
+          city: restaurant.city,
+          latitude: restaurant.latitude,
+          longitude: restaurant.longitude,
+          updatedAt: new Date(),
+        }, { merge: true });
+
+        if (!restaurant.firebaseId) {
+          await this.prisma.restaurant.update({
+            where: { id: restaurant.id },
+            data: { firebaseId: fbId },
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Firebase sync failed in OnboardingService:', error);
+    }
   }
 }

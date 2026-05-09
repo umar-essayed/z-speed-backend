@@ -1,10 +1,10 @@
-import {
   Injectable,
   NotFoundException,
   BadRequestException,
   ForbiddenException,
   Logger,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { OrderStatus, PaymentState, AccountStatus, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrderStateMachineService } from './order-state-machine.service';
@@ -37,6 +37,7 @@ export class OrdersService {
     private readonly driversService: DriversService,
     @Inject(forwardRef(() => FirebaseSyncService))
     private readonly firebaseSync: FirebaseSyncService,
+    private readonly configService: ConfigService,
   ) {}
 
   /**
@@ -87,8 +88,11 @@ export class OrdersService {
         restaurant.latitude,
         restaurant.longitude,
       );
+      
+      const enforceGeofence = this.configService.get<string>('ENFORCE_DELIVERY_GEOFENCE') !== 'false';
       const radius = restaurant.deliveryRadiusKm || 10.0;
-      if (distance > radius) {
+      
+      if (enforceGeofence && distance > radius) {
         throw new BadRequestException('Delivery address is outside the restaurant delivery zone');
       }
     }
@@ -562,10 +566,13 @@ export class OrdersService {
 
     const orderVolume = order.items.reduce((acc: number, item: any) => acc + item.quantity, 0);
 
+    const enforceGeofence = this.configService.get<string>('ENFORCE_DELIVERY_GEOFENCE') !== 'false';
+    const searchRadius = enforceGeofence ? 30 : 100;
+
     const drivers = await this.driversService.findNearbyDrivers(
       order.restaurant.latitude || 0,
       order.restaurant.longitude || 0,
-      30, // Increased to 30km radius as requested
+      searchRadius,
       orderVolume,
     );
 
@@ -636,8 +643,11 @@ export class OrdersService {
     const lat = order.restaurant.latitude || 0;
     const lng = order.restaurant.longitude || 0;
 
+    const enforceGeofence = this.configService.get<string>('ENFORCE_DELIVERY_GEOFENCE') !== 'false';
+    const searchRadius = enforceGeofence ? 30 : 100;
+
     // Use radius 30km for eligibility
-    const nearby = await this.driversService.getAvailableDrivers(lat, lng, 30);
+    const nearby = await this.driversService.getAvailableDrivers(lat, lng, searchRadius);
     
     // De-duplicate by userId to avoid multiple profiles for same person
     const uniqueDriversMap = new Map();

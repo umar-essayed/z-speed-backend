@@ -9,6 +9,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { OrderStatus, Role } from '@prisma/client';
 import { DriversService } from './drivers.service';
 import { SuperTokensAuthGuard } from '../common/guards/auth.guard';
@@ -21,7 +22,10 @@ import { ApplyDriverDto, UpdateLocationDto } from './dto';
 @Controller('drivers')
 @UseGuards(SuperTokensAuthGuard, RolesGuard)
 export class DriversController {
-  constructor(private readonly driversService: DriversService) {}
+  constructor(
+    private readonly driversService: DriversService,
+    private readonly configService: ConfigService,
+  ) {}
 
   @Get('available')
   @Roles(Role.VENDOR, Role.ADMIN)
@@ -30,10 +34,13 @@ export class DriversController {
     @Query('lng') lng?: string,
     @Query('radius') radius?: string
   ) {
+    const enforceGeofence = this.configService.get<string>('ENFORCE_DELIVERY_GEOFENCE') !== 'false';
+    const defaultRadius = enforceGeofence ? 30 : 5000;
+
     return this.driversService.getAvailableDrivers(
       lat ? parseFloat(lat) : undefined,
       lng ? parseFloat(lng) : undefined,
-      radius ? parseFloat(radius) : 30
+      radius ? parseFloat(radius) : defaultRadius
     );
   }
 

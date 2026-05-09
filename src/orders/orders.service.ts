@@ -1,3 +1,4 @@
+import {
   Injectable,
   NotFoundException,
   BadRequestException,
@@ -567,7 +568,7 @@ export class OrdersService {
     const orderVolume = order.items.reduce((acc: number, item: any) => acc + item.quantity, 0);
 
     const enforceGeofence = this.configService.get<string>('ENFORCE_DELIVERY_GEOFENCE') !== 'false';
-    const searchRadius = enforceGeofence ? 30 : 100;
+    const searchRadius = enforceGeofence ? 30 : 5000;
 
     const drivers = await this.driversService.findNearbyDrivers(
       order.restaurant.latitude || 0,
@@ -644,7 +645,7 @@ export class OrdersService {
     const lng = order.restaurant.longitude || 0;
 
     const enforceGeofence = this.configService.get<string>('ENFORCE_DELIVERY_GEOFENCE') !== 'false';
-    const searchRadius = enforceGeofence ? 30 : 100;
+    const searchRadius = enforceGeofence ? 30 : 5000;
 
     // Use radius 30km for eligibility
     const nearby = await this.driversService.getAvailableDrivers(lat, lng, searchRadius);

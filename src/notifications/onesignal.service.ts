@@ -6,8 +6,8 @@ import axios from 'axios';
 @Injectable()
 export class OneSignalService {
   private readonly logger = new Logger(OneSignalService.name);
-  private readonly appId: string;
-  private readonly apiKey: string;
+  private readonly appId: string | undefined;
+  private readonly apiKey: string | undefined;
 
   constructor(private readonly configService: ConfigService) {
     this.appId = this.configService.get<string>('ONESIGNAL_APP_ID');

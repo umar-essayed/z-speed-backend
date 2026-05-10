@@ -254,6 +254,22 @@ export class AuthController {
     return this.authService.forgotPassword(email);
   }
 
+  /**
+   * POST /api/v1/auth/update-fcm-token
+   * تحديث رمز دفع الإشعارات للمستخدم
+   */
+  @Post('update-fcm-token')
+  @UseGuards(AuthGuard)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Update FCM token for push notifications' })
+  async updateFcmToken(
+    @CurrentUser('dbUserId') userId: string,
+    @Body() dto: { token: string; platform?: string },
+  ) {
+    return this.authService.updateFcmToken(userId, dto.token, dto.platform);
+  }
+
   // ─────────────────────────────────────────────────────────────────────────────
   // DEBUG ONLY
   // ─────────────────────────────────────────────────────────────────────────────

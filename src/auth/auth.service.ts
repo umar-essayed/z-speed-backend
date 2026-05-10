@@ -755,4 +755,45 @@ export class AuthService {
       rejectionReason: user.driverProfile?.rejectionReason,
     };
   }
+
+  async updateFcmToken(userId: string, token: string, platform?: string) {
+    this.logger.log(`updateFcmToken: user=${userId}, platform=${platform}`);
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { fcmTokens: true },
+    });
+
+    if (!user) throw new NotFoundException('المستخدم غير موجود');
+
+    let currentTokens: any = user.fcmTokens;
+    let tokens: any[] = [];
+
+    if (Array.isArray(currentTokens)) {
+      tokens = currentTokens;
+    } else if (currentTokens && typeof currentTokens === 'object') {
+      // In case it's stored as a single object or something else
+      tokens = [currentTokens];
+    }
+
+    // Check if token already exists (handles both string and object formats)
+    const exists = tokens.some(t => {
+      if (typeof t === 'string') return t === token;
+      return t?.token === token;
+    });
+
+    if (!exists) {
+      tokens.push({ token, platform: platform || 'unknown', createdAt: new Date() });
+      
+      // Limit to 10 tokens
+      if (tokens.length > 10) tokens.shift();
+
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { fcmTokens: tokens },
+      });
+    }
+
+    return { success: true };
+  }
 }

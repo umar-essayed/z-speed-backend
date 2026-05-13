@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, Logger } from '@nes
 import { PrismaService } from '../prisma/prisma.service';
 import { FirebaseAdminService } from '../firebase/firebase-admin.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { AccountStatus, Role } from '@prisma/client';
+import { AccountStatus, Role, OrderStatus } from '@prisma/client';
 
 @Injectable()
 export class AdminService {
@@ -33,6 +33,9 @@ export class AdminService {
       pendingOrders,
       activeVendors,
       pendingDrivers,
+      activeOrdersCount,
+      onlineDriversCount,
+      openRestaurantsCount,
       recentOrdersList,
       topVendors,
       monthlyOrders,
@@ -46,6 +49,18 @@ export class AdminService {
       this.prisma.order.count({ where: { status: 'PENDING' } }),
       this.prisma.restaurant.count({ where: { status: AccountStatus.ACTIVE } }),
       this.prisma.driverProfile.count({ where: { applicationStatus: 'PENDING' } }),
+      
+      // REAL-TIME STATS
+      this.prisma.order.count({
+        where: { status: { notIn: ['DELIVERED', 'CANCELLED', 'RETURNED'] } },
+      }),
+      this.prisma.driverProfile.count({
+        where: { isAvailable: true }, // or isOnline if you have it
+      }),
+      this.prisma.restaurant.count({
+        where: { isOpen: true, status: AccountStatus.ACTIVE },
+      }),
+
       // Recent Orders
       this.prisma.order.findMany({
         take: 10,
@@ -125,6 +140,9 @@ export class AdminService {
         pendingOrders: { value: pendingOrders, trend: '-2%' },
         activeVendors: { value: activeVendors, trend: '' },
         pendingDrivers: { value: pendingDrivers, trend: '' },
+        activeOrders: { value: activeOrdersCount },
+        onlineDrivers: { value: onlineDriversCount },
+        openRestaurants: { value: openRestaurantsCount },
       },
       recentOrders: recentOrdersList.map(o => ({
         id: o.id.slice(0, 8).toUpperCase(),
@@ -715,74 +733,65 @@ export class AdminService {
 
   async getSettlements() {
     const [
-      vendors, 
-      drivers, 
-      payouts, 
-      activeOrders, 
-      activeDriversCount, 
-      openRestaurants
+      appEarnings,
+      vendorEarnings,
+      driverEarnings,
+      payouts,
+      vendors,
+      drivers,
+      pendingEarnings,
     ] = await Promise.all([
-      this.prisma.restaurant.findMany({
-        where: { status: AccountStatus.ACTIVE },
-        select: {
-          id: true,
-          name: true,
-          walletBalance: true,
-          vendorType: true,
-          _count: { select: { orders: { where: { status: 'DELIVERED' } } } },
-        },
+      // Total App Earnings
+      this.prisma.order.aggregate({
+        where: { status: OrderStatus.DELIVERED },
+        _sum: { appShare: true, serviceFee: true },
       }),
-      this.prisma.driverProfile.findMany({
-        where: { applicationStatus: 'APPROVED' as any },
-        include: {
-          user: { select: { id: true, name: true, walletBalance: true } },
-        },
+      // Total Vendor Earnings
+      this.prisma.restaurant.aggregate({
+        _sum: { totalEarnings: true },
       }),
+      // Total Driver Earnings
+      this.prisma.driverProfile.aggregate({
+        _sum: { totalEarnings: true },
+      }),
+      // Historical Payouts
       this.prisma.ledger.findMany({
         where: { type: { in: ['WITHDRAWAL', 'PAYOUT'] } },
         include: { user: { select: { name: true, role: true, email: true } } },
         orderBy: { createdAt: 'desc' },
+        take: 50,
       }),
-      this.prisma.order.count({
-        where: { status: { notIn: ['DELIVERED', 'CANCELLED', 'RETURNED'] } },
+      // Vendors with balances
+      this.prisma.restaurant.findMany({
+        where: { pendingBalance: { gt: 0 } },
+        select: { id: true, name: true, pendingBalance: true, ownerId: true },
+        orderBy: { pendingBalance: 'desc' },
       }),
-      this.prisma.driverProfile.count({
-        where: { isAvailable: true },
+      // Drivers with balances
+      this.prisma.user.findMany({
+        where: { role: Role.DRIVER, walletBalance: { gt: 0 } },
+        select: { id: true, name: true, walletBalance: true },
+        orderBy: { walletBalance: 'desc' },
       }),
-      this.prisma.restaurant.count({
-        where: { isOpen: true },
-      })
+      // Pending Earning entries
+      this.prisma.ledger.findMany({
+        where: { status: 'pending', type: 'EARNING' },
+        include: { user: { select: { name: true, role: true } } },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+      }),
     ]);
 
     return {
-      stats: {
-        activeOrders,
-        activeDrivers: activeDriversCount,
-        openRestaurants,
+      earnings: {
+        app: (appEarnings._sum.appShare || 0) + (appEarnings._sum.serviceFee || 0),
+        vendors: vendorEarnings._sum.totalEarnings || 0,
+        drivers: driverEarnings._sum.totalEarnings || 0,
       },
-      payouts: payouts.map(p => ({
-        id: p.id,
-        amount: p.amount,
-        status: p.status,
-        type: p.type,
-        date: p.createdAt,
-        userName: p.user?.name,
-        userRole: p.user?.role,
-        userEmail: p.user?.email,
-      })),
-      vendors: vendors.map(v => ({
-        id: v.id,
-        name: v.name,
-        type: v.vendorType,
-        balance: v.walletBalance,
-        ordersCount: v._count.orders,
-      })),
-      drivers: drivers.map(d => ({
-        id: d.id,
-        userId: d.userId,
-        name: d.user?.name || 'Unknown',
-        balance: d.user?.walletBalance || 0,
-      })),
+      payouts,
+      vendors,
+      drivers,
+      pendingEarnings,
     };
   }
 

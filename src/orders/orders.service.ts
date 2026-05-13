@@ -219,13 +219,20 @@ export class OrdersService {
       data: { restaurantId: null },
     });
 
-    this.logger.log(`Order created: ${order.id} by customer ${customerId}`);
-
+    this.logger.log(`Order created: ${order.id} by customer ${customerId} for restaurant ${dto.restaurantId}`);
+    
     // Notify Vendor (Backgrounded)
+    this.logger.log(`Triggering notifyVendor and emitToVendor for restaurant ${dto.restaurantId}`);
     this.notifications.notifyVendor(dto.restaurantId, order.id).catch(err => 
       this.logger.error(`Failed to notify vendor for order ${order.id}:`, err.stack)
     );
-    this.gateway.emitToVendor(dto.restaurantId, 'order:new', order);
+    
+    try {
+      this.gateway.emitToVendor(dto.restaurantId, 'order:new', order);
+      this.logger.log(`Successfully called emitToVendor for restaurant ${dto.restaurantId}`);
+    } catch (err) {
+      this.logger.error(`Failed to emit to vendor via gateway:`, err.stack);
+    }
 
     // 10. If card, initiate payment
     if (dto.paymentMethod === 'CYBERSOURCE_CARD' && dto.transientToken) {

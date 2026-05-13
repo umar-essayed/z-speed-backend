@@ -128,11 +128,14 @@ export class NotificationsService {
    * Notify vendor about a new order.
    */
   async notifyVendor(restaurantId: string, orderId: string) {
+    this.logger.log(`Attempting to notify vendor for restaurant ${restaurantId} and order ${orderId}`);
     const restaurant = await this.prisma.restaurant.findUnique({
       where: { id: restaurantId },
       select: { ownerId: true, name: true },
     });
+    
     if (restaurant) {
+      this.logger.log(`Found restaurant ${restaurant.name} owned by ${restaurant.ownerId}. Creating notification.`);
       await this.createNotification(
         restaurant.ownerId,
         'New Order!',
@@ -140,6 +143,8 @@ export class NotificationsService {
         'order_new',
         { orderId },
       );
+    } else {
+      this.logger.warn(`No restaurant found with id ${restaurantId} to notify vendor.`);
     }
   }
 

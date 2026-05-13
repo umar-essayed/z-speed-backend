@@ -57,6 +57,25 @@ export class NotificationsController {
   ) {
     return this.notificationsService.deleteNotification(userId, id);
   }
+
+  @Post('test')
+  async testNotification(@CurrentUser('userId') userId: string) {
+    return this.notificationsService.createNotification(
+      userId,
+      'Test Notification',
+      'This is a test notification from the system.',
+      'test',
+      { time: new Date().toISOString() },
+    );
+  }
+
+  @Post('test-vendor')
+  async testVendorNotification(
+    @CurrentUser('userId') userId: string,
+    @Body('restaurantId') restaurantId: string,
+  ) {
+    return this.notificationsService.notifyVendor(restaurantId, 'test-order-id');
+  }
 }
 
 @Controller('admin/notifications')

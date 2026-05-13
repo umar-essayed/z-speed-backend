@@ -221,11 +221,14 @@ export class OrdersService {
 
     this.logger.log(`Order created: ${order.id} by customer ${customerId} for restaurant ${dto.restaurantId}`);
     
-    // Notify Vendor (Backgrounded)
+    // Notify Vendor (Sequential to ensure DB record exists for Socket refresh)
     this.logger.log(`Triggering notifyVendor and emitToVendor for restaurant ${dto.restaurantId}`);
-    this.notifications.notifyVendor(dto.restaurantId, order.id).catch(err => 
-      this.logger.error(`Failed to notify vendor for order ${order.id}:`, err.stack)
-    );
+    try {
+      await this.notifications.notifyVendor(dto.restaurantId, order.id);
+      this.logger.log(`Notification persisted for order ${order.id}`);
+    } catch (err) {
+      this.logger.error(`Failed to notify vendor for order ${order.id}:`, err.stack);
+    }
     
     try {
       this.gateway.emitToVendor(dto.restaurantId, 'order:new', order);

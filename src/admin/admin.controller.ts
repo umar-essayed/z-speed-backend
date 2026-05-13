@@ -176,6 +176,11 @@ export class AdminController {
     return this.adminService.getSettlements();
   }
 
+  @Post('settlements/payout')
+  async processPayout(@Body() dto: { userId: string, amount: number, notes?: string }) {
+    return this.adminService.processPayout(dto);
+  }
+
   // =============================================
   // SETTINGS
   // =============================================

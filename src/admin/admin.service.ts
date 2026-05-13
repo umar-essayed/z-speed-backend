@@ -695,7 +695,14 @@ export class AdminService {
   // =============================================
 
   async getSettlements() {
-    const [vendors, drivers] = await Promise.all([
+    const [
+      vendors, 
+      drivers, 
+      payouts, 
+      activeOrders, 
+      activeDriversCount, 
+      openRestaurants
+    ] = await Promise.all([
       this.prisma.restaurant.findMany({
         where: { status: AccountStatus.ACTIVE },
         select: {
@@ -712,9 +719,38 @@ export class AdminService {
           user: { select: { id: true, name: true, walletBalance: true } },
         },
       }),
+      this.prisma.ledger.findMany({
+        where: { type: { in: ['WITHDRAWAL', 'PAYOUT'] } },
+        include: { user: { select: { name: true, role: true, email: true } } },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.order.count({
+        where: { status: { notIn: ['DELIVERED', 'CANCELLED', 'RETURNED'] } },
+      }),
+      this.prisma.driverProfile.count({
+        where: { isAvailable: true },
+      }),
+      this.prisma.restaurant.count({
+        where: { isOpen: true },
+      })
     ]);
 
     return {
+      stats: {
+        activeOrders,
+        activeDrivers: activeDriversCount,
+        openRestaurants,
+      },
+      payouts: payouts.map(p => ({
+        id: p.id,
+        amount: p.amount,
+        status: p.status,
+        type: p.type,
+        date: p.createdAt,
+        userName: p.user?.name,
+        userRole: p.user?.role,
+        userEmail: p.user?.email,
+      })),
       vendors: vendors.map(v => ({
         id: v.id,
         name: v.name,
@@ -725,10 +761,55 @@ export class AdminService {
       drivers: drivers.map(d => ({
         id: d.id,
         userId: d.userId,
-        name: d.user.name,
-        balance: d.user.walletBalance,
+        name: d.user?.name || 'Unknown',
+        balance: d.user?.walletBalance || 0,
       })),
     };
+  }
+
+  // =============================================
+  // PROCESS PAYOUT
+  // =============================================
+
+  async processPayout(dto: { userId: string, amount: number, notes?: string }) {
+    const { userId, amount, notes } = dto;
+    
+    // Find the user to deduct balance
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+    
+    if (user.walletBalance < amount) {
+      throw new BadRequestException('Insufficient wallet balance');
+    }
+
+    // Wrap in a transaction
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: userId },
+        data: { walletBalance: { decrement: amount } },
+      });
+
+      // Update restaurant wallet balance if the user is a vendor
+      if (user.role === Role.VENDOR) {
+        await tx.restaurant.updateMany({
+          where: { ownerId: userId },
+          data: { walletBalance: { decrement: amount } },
+        });
+      }
+
+      await tx.ledger.create({
+        data: {
+          userId,
+          type: 'WITHDRAWAL',
+          amount: -amount, // Record as negative or positive depending on accounting rules (keeping positive as it represents the withdrawal amount)
+          status: 'completed',
+          description: notes || 'Admin initiated payout',
+          referenceId: `payout_${Date.now()}_${userId.slice(0, 5)}`
+        }
+      });
+    });
+
+    return { message: 'Payout processed successfully' };
   }
 
   // =============================================

@@ -111,11 +111,11 @@ export class AdminService {
       this.prisma.order.groupBy({ by: ['status'], _count: true }),
     ]);
 
-    const userRolesMap = {};
-    userRoles.forEach(r => { userRolesMap[r.role] = r._count; });
+    const userRolesMap: Record<string, number> = {};
+    userRoles.forEach(r => { userRolesMap[r.role as string] = r._count; });
 
-    const orderStatusesMap = {};
-    orderStatuses.forEach(s => { orderStatusesMap[s.status] = s._count; });
+    const orderStatusesMap: Record<string, number> = {};
+    orderStatuses.forEach(s => { orderStatusesMap[s.status as string] = s._count; });
 
     return {
       stats: {
@@ -210,7 +210,6 @@ export class AdminService {
       include: {
         addresses: true,
         driverProfile: { include: { vehicle: true } },
-        restaurants: { select: { id: true, name: true, status: true } },
         orders: { take: 5, orderBy: { createdAt: 'desc' } },
       },
     });
@@ -271,13 +270,13 @@ export class AdminService {
       userId: d.userId,
       name: d.user.name,
       email: d.user.email,
-      phone: d.user.phone || d.phone,
+      phone: d.user.phone || '',
       status: d.applicationStatus,
       submitted: d.createdAt,
       personal: {
         name: d.user.name,
         email: d.user.email,
-        phone: d.user.phone || d.phone,
+        phone: d.user.phone || '',
         nationalId: d.nationalId,
         dateOfBirth: d.dateOfBirth,
       },

@@ -101,9 +101,9 @@ export class FirebaseSyncService implements OnModuleInit {
     if (!data.email) return;
 
     // Map Firebase roles to PostgreSQL roles
-    let role = Role.CUSTOMER;
+    let role: Role = Role.CUSTOMER;
     if (data.role === 'admin' || data.role === 'ADMIN') role = Role.ADMIN;
-    else if (data.role === 'superadmin' || data.role === 'SUPERADMIN') role = Role.SUPERADMIN;
+    else if (data.role === 'superadmin' || data.role === 'SUPERADMIN') role = Role.SUPERADMIN as Role;
     else if (data.role === 'vendor' || data.role === 'VENDOR') role = Role.VENDOR;
     else if (data.role === 'driver' || data.role === 'DRIVER') role = Role.DRIVER;
 

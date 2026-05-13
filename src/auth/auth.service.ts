@@ -650,7 +650,7 @@ export class AuthService {
   // FORGOT / RESET PASSWORD — via Supabase
   // ─────────────────────────────────────────────────────────────────────────────
 
-  async forgotPassword(email: string) {
+  async forgotPassword(email: string, clientRedirectTo?: string) {
     const user = await this.prisma.user.findUnique({ where: { email } });
     // Don't reveal if email exists
     if (!user || user.authProvider !== 'email') {
@@ -658,7 +658,7 @@ export class AuthService {
     }
 
     try {
-      const redirectTo = this.configService.get<string>(
+      const redirectTo = clientRedirectTo || this.configService.get<string>(
         'SUPABASE_REDIRECT_URI',
         'http://localhost:5173/auth/reset-password',
       );
@@ -668,6 +668,31 @@ export class AuthService {
     }
 
     return { message: 'إذا كان البريد مسجلاً، ستصلك رسالة إعادة تعيين كلمة المرور' };
+  }
+
+  async resetPassword(accessToken: string, newPassword: string) {
+    this.logger.log('resetPassword called');
+    
+    // Verify token and get user
+    const { data: { user }, error: userError } = await this.supabaseService.admin.auth.getUser(accessToken);
+    
+    if (userError || !user) {
+      this.logger.error(`Reset password failed: ${userError?.message}`);
+      throw new UnauthorizedException('رابط غير صالح أو منتهي الصلاحية');
+    }
+
+    // Update password using admin API
+    const { error: updateError } = await this.supabaseService.authAdmin.updateUserById(
+      user.id,
+      { password: newPassword }
+    );
+
+    if (updateError) {
+      this.logger.error(`Failed to update password for ${user.id}: ${updateError.message}`);
+      throw new BadRequestException('فشل تعيين كلمة المرور الجديدة');
+    }
+
+    return { message: 'تم تعيين كلمة المرور بنجاح، يمكنك تسجيل الدخول الآن' };
   }
 
   // ─────────────────────────────────────────────────────────────────────────────

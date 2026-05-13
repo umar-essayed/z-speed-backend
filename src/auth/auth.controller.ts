@@ -250,12 +250,27 @@ export class AuthController {
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Request password reset email' })
-  async forgotPassword(@Body('email') email: string) {
-    return this.authService.forgotPassword(email);
+  async forgotPassword(@Body('email') email: string, @Body('redirectTo') redirectTo?: string) {
+    return this.authService.forgotPassword(email, redirectTo);
+  }
+
+  /**
+   * POST /api/v1/auth/reset-password
+   * تعيين كلمة مرور جديدة بعد استخدام الرابط
+   */
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Reset password using access token from email link' })
+  async resetPassword(
+    @Body('accessToken') accessToken: string,
+    @Body('newPassword') newPassword: string
+  ) {
+    return this.authService.resetPassword(accessToken, newPassword);
   }
 
   /**
    * POST /api/v1/auth/update-fcm-token
+
    * تحديث رمز دفع الإشعارات للمستخدم
    */
   @Post('update-fcm-token')

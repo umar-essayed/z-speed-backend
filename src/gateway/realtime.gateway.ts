@@ -120,8 +120,13 @@ export class RealtimeGateway
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { restaurantId: string },
   ) {
-    client.join(`vendor:${data.restaurantId}`);
-    this.logger.log(`Vendor ${client.data.userId} joined vendor:${data.restaurantId}`);
+    const room = `vendor:${data.restaurantId}`;
+    client.join(room);
+    this.logger.log(`🔍 [SOCKET] User ${client.data.userId} subscribed to room: ${room}`);
+    
+    // Log all rooms for this client
+    const rooms = Array.from(client.rooms);
+    this.logger.log(`🔍 [SOCKET] User ${client.data.userId} current rooms: ${rooms.join(', ')}`);
   }
 
   // =============================================
@@ -133,7 +138,16 @@ export class RealtimeGateway
   }
 
   emitToVendor(restaurantId: string, event: string, data: any) {
-    this.server.to(`vendor:${restaurantId}`).emit(event, data);
+    const room = `vendor:${restaurantId}`;
+    this.logger.log(`📡 [SOCKET] Emitting ${event} to room ${room}`);
+    this.server.to(room).emit(event, data);
+    
+    // Redundant emission to the owner's personal room if possible
+    // This is a safety net in case restaurant subscription failed
+    if (data.restaurant?.ownerId) {
+      this.logger.log(`📡 [SOCKET] Redundant emission to user:${data.restaurant.ownerId}`);
+      this.server.to(`user:${data.restaurant.ownerId}`).emit(event, data);
+    }
   }
 
   emitToDriver(userId: string, event: string, data: any) {

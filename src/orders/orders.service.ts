@@ -186,11 +186,14 @@ export class OrdersService {
             quantity: item.quantity,
             unitPrice: item.unitPrice,
             selectedAddons: item.selectedAddons ?? undefined,
-            specialNote: item.specialNote ?? undefined,
+                        specialNote: item.specialNote ?? undefined,
           })),
         },
       },
-      include: { items: { include: { foodItem: true } } },
+      include: { 
+        items: { include: { foodItem: true } },
+        restaurant: { select: { ownerId: true } }
+      },
     });
 
     // 8. Record promo usage

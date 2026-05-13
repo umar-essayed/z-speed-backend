@@ -26,13 +26,13 @@ export class NotificationsService {
       data: { userId, title, body, type, data },
     });
 
-    // Offload push notification to BullMQ
-    await this.notificationQueue.add('sendPush', {
+    // Offload push notification to BullMQ (Non-blocking)
+    this.notificationQueue.add('sendPush', {
       userId,
       title,
       body,
       data,
-    });
+    }).catch(err => this.logger.error(`Failed to queue push notification for ${userId}: ${err.message}`));
 
     this.logger.log(`Notification created and queued for ${userId}: ${title}`);
     return notification;

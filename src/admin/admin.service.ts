@@ -359,15 +359,30 @@ export class AdminService {
 
   async getRestaurantApplications(status?: string, vendorType?: string) {
     const where: any = {};
+    
     if (status && status !== 'all') {
-      let mappedStatus = status.toUpperCase();
-      if (mappedStatus === 'PENDING') mappedStatus = AccountStatus.PENDING_VERIFICATION;
-      where.status = mappedStatus;
-    } else if (!status || status === 'pending') {
+      const s = status.toUpperCase();
+      if (s === 'PENDING') {
+        where.status = AccountStatus.PENDING_VERIFICATION;
+      } else if (s === 'APPROVED') {
+        where.status = AccountStatus.ACTIVE;
+      } else {
+        where.status = s as any;
+      }
+    } else if (!status) {
       where.status = AccountStatus.PENDING_VERIFICATION;
     }
+
     if (vendorType && vendorType !== 'all') {
-      where.vendorType = vendorType.toUpperCase();
+      const t = vendorType.toUpperCase();
+      if (t === 'RESTAURANT') {
+        where.OR = [
+          { vendorType: { equals: 'RESTAURANT', mode: 'insensitive' } },
+          { vendorType: null },
+        ];
+      } else {
+        where.vendorType = { equals: t, mode: 'insensitive' };
+      }
     }
 
     const data = await this.prisma.restaurant.findMany({

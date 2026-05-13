@@ -210,6 +210,8 @@ export class AdminService {
       include: {
         addresses: true,
         driverProfile: { include: { vehicle: true } },
+        ownedRestaurants: true,
+        ledgers: { orderBy: { createdAt: 'desc' } },
         orders: { take: 5, orderBy: { createdAt: 'desc' } },
       },
     });
@@ -358,8 +360,10 @@ export class AdminService {
   async getRestaurantApplications(status?: string, vendorType?: string) {
     const where: any = {};
     if (status && status !== 'all') {
-      where.status = status.toUpperCase();
-    } else {
+      let mappedStatus = status.toUpperCase();
+      if (mappedStatus === 'PENDING') mappedStatus = AccountStatus.PENDING_VERIFICATION;
+      where.status = mappedStatus;
+    } else if (!status || status === 'pending') {
       where.status = AccountStatus.PENDING_VERIFICATION;
     }
     if (vendorType && vendorType !== 'all') {

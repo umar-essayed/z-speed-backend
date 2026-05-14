@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, BadRequestException, Logger } from '@nes
 import { PrismaService } from '../prisma/prisma.service';
 import { FirebaseAdminService } from '../firebase/firebase-admin.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { AccountStatus, Role, OrderStatus } from '@prisma/client';
+import { AccountStatus, Role, OrderStatus, LedgerType } from '@prisma/client';
 import { SignatureUtil } from '../wallet/signature.util';
 
 @Injectable()
@@ -128,42 +128,54 @@ export class AdminService {
     ]);
 
     const userRolesMap: Record<string, number> = {};
-    userRoles.forEach(r => { userRolesMap[r.role as string] = r._count; });
+    userRoles.forEach((r: any) => { 
+      const count = typeof r._count === 'object' ? (r._count._all || Object.values(r._count)[0]) : r._count;
+      userRolesMap[r.role as string] = Number(count || 0); 
+    });
 
     const orderStatusesMap: Record<string, number> = {};
-    orderStatuses.forEach(s => { orderStatusesMap[s.status as string] = s._count; });
+    orderStatuses.forEach((s: any) => { 
+      const count = typeof s._count === 'object' ? (s._count._all || Object.values(s._count)[0]) : s._count;
+      orderStatusesMap[s.status as string] = Number(count || 0); 
+    });
 
-    return {
+    const monthlyRevenueHistory = Object.entries(revenueChart)
+      .map(([date, revenue]) => ({ date, revenue }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    const result = {
       stats: {
-        totalUsers: { value: totalUsers, trend: '+5%' },
-        totalOrders: { value: totalOrders, trend: orderTrend },
-        totalRevenue: { value: revenueAgg._sum.total || 0, trend: revTrend },
-        pendingOrders: { value: pendingOrders, trend: '' },
-        activeOrders: { value: activeOrdersCount },
-        onlineDrivers: { value: onlineDriversCount },
-        openRestaurants: { value: openRestaurantsCount },
+        totalUsers: { value: Number(totalUsers || 0), trend: '+5%' },
+        totalOrders: { value: Number(totalOrders || 0), trend: orderTrend || '+0%' },
+        totalRevenue: { value: Number(revenueAgg?._sum?.total || 0), trend: revTrend || '+0%' },
+        pendingOrders: { value: Number(pendingOrders || 0), trend: '' },
+        activeOrders: { value: Number(activeOrdersCount || 0) },
+        onlineDrivers: { value: Number(onlineDriversCount || 0) },
+        openRestaurants: { value: Number(openRestaurantsCount || 0) },
       },
-      recentOrders: recentOrdersList.map((o: any) => ({
-        id: o.firebaseOrderId || o.id.slice(0, 8),
+      recentOrders: (recentOrdersList || []).map((o: any) => ({
+        id: o.firebaseOrderId || o.id?.slice(0, 8) || 'N/A',
         customer: o.customer?.name || 'Unknown',
         vendor: o.restaurant?.name || 'Unknown',
-        amount: o.total,
-        status: o.status,
-        date: o.createdAt,
+        amount: Number(o.total || 0),
+        status: o.status || 'UNKNOWN',
+        date: o.createdAt || new Date(),
       })),
-      topVendors: topVendors.map((v: any) => ({
+      topVendors: (topVendors || []).map((v: any) => ({
         id: v.id,
-        name: v.name,
-        rating: v.rating,
-        ordersCount: v._count.orders,
-        revenue: v.totalEarnings,
+        name: v.name || 'Unknown',
+        rating: Number(v.rating || 0),
+        ordersCount: Number(v._count?.orders || 0),
+        revenue: Number(v.totalEarnings || 0),
       })),
-      revenueChart: monthlyRevenueHistory,
+      revenueChart: monthlyRevenueHistory || [],
       distributions: {
-        roles: userRolesMap,
-        orderStatuses: orderStatusesMap,
+        roles: userRolesMap || {},
+        orderStatuses: orderStatusesMap || {},
       }
     };
+
+    return result;
   }
 
   // =============================================
@@ -835,7 +847,7 @@ export class AdminService {
       }),
       // Historical Payouts
       this.prisma.ledger.findMany({
-        where: { type: { in: ['WITHDRAWAL', 'PAYOUT'] } },
+        where: { type: { in: [LedgerType.WITHDRAWAL, LedgerType.PAYOUT] } },
         include: { user: { select: { name: true, role: true, email: true } } },
         orderBy: { createdAt: 'desc' },
         take: 50,
@@ -852,31 +864,47 @@ export class AdminService {
       }),
       // Pending Earning entries
       this.prisma.ledger.findMany({
-        where: { status: 'pending', type: 'EARNING' },
+        where: { status: 'pending', type: LedgerType.EARNING },
         include: { user: { select: { name: true, role: true } } },
         orderBy: { createdAt: 'desc' },
         take: 50,
       }),
     ]);
 
-    return {
+    const result = {
       earnings: {
-        app: Number(appEarnings._sum.appShare || 0) + Number(appEarnings._sum.serviceFee || 0),
-        vendors: Number(vendorEarnings._sum.totalEarnings || 0),
-        drivers: Number(driverEarnings._sum.totalEarnings || 0),
-        totalVolume: Number(appEarnings._sum.appShare || 0) + Number(vendorEarnings._sum.totalEarnings || 0) + Number(driverEarnings._sum.totalEarnings || 0),
+        app: Number(appEarnings?._sum?.appShare || 0) + Number(appEarnings?._sum?.serviceFee || 0),
+        vendors: Number(vendorEarnings?._sum?.totalEarnings || 0),
+        drivers: Number(driverEarnings?._sum?.totalEarnings || 0),
+        totalVolume: Number(appEarnings?._sum?.appShare || 0) + Number(vendorEarnings?._sum?.totalEarnings || 0) + Number(driverEarnings?._sum?.totalEarnings || 0),
       },
-      payouts: payouts,
-      vendors: vendors,
-      drivers: drivers.map((d: any) => ({
+      payouts: payouts || [],
+      vendors: (vendors || []).map((v: any) => ({
+        id: v.id,
+        ownerId: v.ownerId,
+        name: v.name || 'Unknown',
+        pendingBalance: Number(v.pendingBalance || 0)
+      })),
+      drivers: (drivers || []).map((d: any) => ({
         id: d.id,
         name: d.user?.name || 'Unknown',
-        balance: d.user?.walletBalance || 0,
-        debt: d.debtBalance || 0,
-        totalEarnings: d.totalEarnings || 0
+        balance: Number(d.user?.walletBalance || 0),
+        debt: Number(d.debtBalance || 0),
+        totalEarnings: Number(d.totalEarnings || 0)
       })),
-      pendingEarnings: pendingEarnings,
+      pendingEarnings: (pendingEarnings || []).map((le: any) => ({
+        id: le.id,
+        createdAt: le.createdAt,
+        amount: Number(le.amount || 0),
+        status: le.status,
+        user: {
+          name: le.user?.name || 'Unknown',
+          role: le.user?.role || 'USER'
+        }
+      })),
     };
+
+    return result;
   }
 
   async exportTransactionsCsv(filters: { startDate?: string; endDate?: string }) {

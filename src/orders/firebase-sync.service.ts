@@ -202,41 +202,87 @@ export class FirebaseSyncService implements OnModuleInit {
         }
       }
 
-      // 4. Create Order in PostgreSQL
       // 4. Create or Update Order in PostgreSQL
+      // ── Financial Calculation (uses Admin Settings) ─────────────────────────
+      // Load system config so Firebase orders obey the same fee rules as web orders
+      const sysConfig = await this.prisma.systemConfig.findFirst();
+      const platformFeePercent = sysConfig?.platformFeePercent ?? 2.0;
+      const commissionRate     = sysConfig?.defaultAppCommissionRate ?? 0.20;
+
+      const rawDeliveryFee = Number(data.deliveryFee || data.delivery_fee || 0);
+      const rawTax         = Number(data.tax || data.tax_amount || 0);
+      const rawDiscount    = Number(data.discount || 0);
+
+      // Subtotal: prefer explicit field, otherwise back-calculate from total
+      const rawSubtotal = data.subtotal
+        ? Number(data.subtotal)
+        : (data.total
+            ? Math.max(0, Number(data.total) - rawDeliveryFee - Number(data.serviceFee ?? data.service_fee ?? 0) - rawTax)
+            : 0);
+
+      // serviceFee: use what Firebase sent; if absent, compute from platformFeePercent (admin setting)
+      const rawServiceFee = (data.serviceFee != null || data.service_fee != null)
+        ? Number(data.serviceFee ?? data.service_fee)
+        : Math.round(rawSubtotal * (platformFeePercent / 100) * 100) / 100;
+
+      const rawTotal = data.total
+        ? Number(data.total)
+        : Math.round((rawSubtotal + rawDeliveryFee + rawServiceFee - rawDiscount + rawTax) * 100) / 100;
+
+      // Pre-compute financial shares — saved immediately so Admin Panel shows full breakdown.
+      // These are recalculated precisely again when order reaches DELIVERED.
+      const appCommission   = Math.round(rawSubtotal * commissionRate * 100) / 100;
+      const restaurantShare = Math.round((rawSubtotal - appCommission) * 100) / 100;
+      const driverShare     = rawDeliveryFee;
+      const appShare        = Math.round((appCommission + rawServiceFee) * 100) / 100;
+
+      this.logger.log(
+        `💰 Order ${doc.id} — subtotal:${rawSubtotal} delivery:${rawDeliveryFee} ` +
+        `serviceFee:${rawServiceFee}(${platformFeePercent}%) total:${rawTotal} ` +
+        `| commission:${appCommission}(${commissionRate*100}%) resto:${restaurantShare} app:${appShare}`
+      );
+      // ─────────────────────────────────────────────────────────────────────────
+
       const order = await this.prisma.order.upsert({
         where: { firebaseOrderId: doc.id },
         update: {
-          status: this.mapFirebaseToPostgresStatus(data.status) || OrderStatus.PENDING,
-          subtotal: data.subtotal || (data.total ? (data.total - (data.deliveryFee || data.delivery_fee || 0) - (data.serviceFee || data.service_fee || 0) - (data.tax || data.tax_amount || 0)) : 0),
-          deliveryFee: data.deliveryFee || data.delivery_fee || 0,
-          serviceFee: data.serviceFee || data.service_fee || 0,
-          tax: data.tax || data.tax_amount || 0,
-          total: data.total || 0,
+          status:      this.mapFirebaseToPostgresStatus(data.status) || OrderStatus.PENDING,
+          subtotal:    rawSubtotal,
+          deliveryFee: rawDeliveryFee,
+          serviceFee:  rawServiceFee,
+          tax:         rawTax,
+          total:       rawTotal,
           paymentState: data.paymentState === 'paid' ? PaymentState.PAID : PaymentState.PENDING,
           deliveryAddress: data.deliveryAddress || 'Synced Address',
+          // Keep shares current while order is in-progress
+          appCommission,
+          restaurantShare,
+          driverShare,
+          appShare,
           updatedAt: new Date(),
         },
         create: {
           customerId,
           restaurantId,
           firebaseOrderId: doc.id,
-          status: this.mapFirebaseToPostgresStatus(data.status) || OrderStatus.PENDING,
-          subtotal: data.subtotal || (data.total ? (data.total - (data.deliveryFee || data.delivery_fee || 0) - (data.serviceFee || data.service_fee || 0) - (data.tax || data.tax_amount || 0)) : 0),
-          deliveryFee: data.deliveryFee || data.delivery_fee || 0,
-          serviceFee: data.serviceFee || data.service_fee || 0,
-          tax: data.tax || data.tax_amount || 0,
-          discount: data.discount || 0,
-          total: data.total || 0,
+          status:      this.mapFirebaseToPostgresStatus(data.status) || OrderStatus.PENDING,
+          subtotal:    rawSubtotal,
+          deliveryFee: rawDeliveryFee,
+          serviceFee:  rawServiceFee,
+          tax:         rawTax,
+          discount:    rawDiscount,
+          total:       rawTotal,
           paymentMethod: (data.paymentMethod || 'CASH').toUpperCase(),
           paymentState: data.paymentState === 'paid' ? PaymentState.PAID : PaymentState.PENDING,
           deliveryAddress: data.deliveryAddress || 'Synced Address',
           deliveryLat: data.deliveryLat || 30.0444,
           deliveryLng: data.deliveryLng || 31.2357,
-          customerNote: `Synced from Firebase (${doc.id})\n${data.customerNote || ''}`,
-          items: {
-            create: itemsToCreate
-          }
+          customerNote: data.customerNote ? `${data.customerNote}\n[Firebase: ${doc.id}]` : `[Firebase: ${doc.id}]`,
+          appCommission,
+          restaurantShare,
+          driverShare,
+          appShare,
+          items: { create: itemsToCreate }
         },
         include: {
           items: { include: { foodItem: true } },
@@ -244,24 +290,18 @@ export class FirebaseSyncService implements OnModuleInit {
         }
       });
 
-      // Success log removed to prevent spam
-
-      // 5. Broadcast to Dashboard
+      // 5. Broadcast to Vendor Dashboard
       this.gateway.emitToVendor(restaurantId, 'order:new', order);
 
-      // 5.1 Trigger Driver Assignment if confirmed (DISABLED TEMPORARILY AS REQUESTED)
-      /*
-      if (order.status === OrderStatus.CONFIRMED) {
-        this.ordersService.assignDriversToOrder(order.id).catch(err => 
-          this.logger.error(`Auto-dispatch failed for synced order ${order.id}:`, err.stack)
-        );
-      }
-      */
-
-      // 6. Mark as synced in Firebase
+      // 6. Mark as synced in Firebase + push back corrected fee values
+      //    so the mobile app always reflects server-computed fees (admin settings)
       await doc.ref.update({
         syncedToPostgres: true,
-        postgresOrderId: order.id,
+        postgresOrderId:  order.id,
+        serviceFee:       rawServiceFee,
+        appCommission,
+        restaurantShare,
+        appShare,
       });
 
     } catch (error) {

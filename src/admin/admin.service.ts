@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { FirebaseAdminService } from '../firebase/firebase-admin.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AccountStatus, Role, OrderStatus } from '@prisma/client';
+import { SignatureUtil } from '../wallet/signature.util';
 
 @Injectable()
 export class AdminService {
@@ -802,37 +803,63 @@ export class AdminService {
   async processPayout(dto: { userId: string, amount: number, notes?: string }) {
     const { userId, amount, notes } = dto;
     
-    // Find the user to deduct balance
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    const user = await this.prisma.user.findUnique({ 
+      where: { id: userId },
+      include: { ownedRestaurants: true }
+    });
     if (!user) throw new NotFoundException('User not found');
     
-    if (user.walletBalance < amount) {
-      throw new BadRequestException('Insufficient wallet balance');
+    // Calculate total available balance (User wallet + Restaurant pending balances)
+    const restaurantPendingTotal = user.ownedRestaurants.reduce((sum, r) => sum + (r.pendingBalance || 0), 0);
+    const totalAvailable = user.walletBalance + restaurantPendingTotal;
+
+    if (totalAvailable < amount) {
+      throw new BadRequestException(`Insufficient balance. Available: EGP ${totalAvailable.toFixed(2)}`);
     }
 
     // Wrap in a transaction
     await this.prisma.$transaction(async (tx) => {
-      await tx.user.update({
-        where: { id: userId },
-        data: { walletBalance: { decrement: amount } },
-      });
+      let remainingToDeduct = amount;
 
-      // Update restaurant wallet balance if the user is a vendor
-      if (user.role === Role.VENDOR) {
-        await tx.restaurant.updateMany({
-          where: { ownerId: userId },
-          data: { walletBalance: { decrement: amount } },
+      // 1. Deduct from User Wallet first
+      if (user.walletBalance > 0) {
+        const deductFromWallet = Math.min(user.walletBalance, remainingToDeduct);
+        await tx.user.update({
+          where: { id: userId },
+          data: { walletBalance: { decrement: deductFromWallet } },
         });
+        remainingToDeduct -= deductFromWallet;
       }
 
+      // 2. Deduct remaining from Restaurant Pending Balances
+      if (remainingToDeduct > 0) {
+        for (const restaurant of user.ownedRestaurants) {
+          if (remainingToDeduct <= 0) break;
+          const deductFromRest = Math.min(restaurant.pendingBalance || 0, remainingToDeduct);
+          if (deductFromRest > 0) {
+            await tx.restaurant.update({
+              where: { id: restaurant.id },
+              data: { pendingBalance: { decrement: deductFromRest } },
+            });
+            remainingToDeduct -= deductFromRest;
+          }
+        }
+      }
+
+      // 3. Create Ledger Entry
       await tx.ledger.create({
         data: {
           userId,
           type: 'WITHDRAWAL',
-          amount: -amount, // Record as negative or positive depending on accounting rules (keeping positive as it represents the withdrawal amount)
+          amount: -amount,
           status: 'completed',
           description: notes || 'Admin initiated payout',
-          referenceId: `payout_${Date.now()}_${userId.slice(0, 5)}`
+          referenceId: `payout_${Date.now()}_${userId.slice(0, 5)}`,
+          signature: SignatureUtil.signLedgerEntry({
+            userId,
+            type: 'WITHDRAWAL',
+            amount: -amount,
+          } as any)
         }
       });
     });

@@ -46,14 +46,14 @@ export class AdminService {
     ] = await Promise.all([
       this.prisma.user.count({ where: { role: Role.CUSTOMER, deletedAt: null } }),
       this.prisma.order.count(),
-      this.prisma.order.aggregate({ _sum: { total: true }, where: { status: 'DELIVERED' } }),
-      this.prisma.order.count({ where: { status: 'PENDING' } }),
+      this.prisma.order.aggregate({ _sum: { total: true }, where: { status: OrderStatus.DELIVERED } }),
+      this.prisma.order.count({ where: { status: OrderStatus.PENDING } }),
       this.prisma.restaurant.count({ where: { status: AccountStatus.ACTIVE } }),
       this.prisma.driverProfile.count({ where: { applicationStatus: 'PENDING' } }),
       
       // REAL-TIME STATS
       this.prisma.order.count({
-        where: { status: { notIn: ['DELIVERED', 'CANCELLED', 'RETURNED'] } },
+        where: { status: { notIn: [OrderStatus.DELIVERED, OrderStatus.CANCELLED, OrderStatus.RETURNED] } },
       }),
       this.prisma.driverProfile.count({
         where: { isAvailable: true }, // or isOnline if you have it
@@ -77,7 +77,7 @@ export class AdminService {
         take: 5,
         orderBy: { rating: 'desc' },
         include: {
-          _count: { select: { orders: { where: { status: 'DELIVERED' } } } },
+          _count: { select: { orders: { where: { status: OrderStatus.DELIVERED } } } },
         },
       }),
       // This month orders count
@@ -87,12 +87,12 @@ export class AdminService {
       // This month revenue
       this.prisma.order.aggregate({
         _sum: { total: true },
-        where: { status: 'DELIVERED', createdAt: { gte: thirtyDaysAgo } },
+        where: { status: OrderStatus.DELIVERED, createdAt: { gte: thirtyDaysAgo } },
       }),
       // Last month revenue
       this.prisma.order.aggregate({
         _sum: { total: true },
-        where: { status: 'DELIVERED', createdAt: { gte: lastMonthStart, lt: thirtyDaysAgo } },
+        where: { status: OrderStatus.DELIVERED, createdAt: { gte: lastMonthStart, lt: thirtyDaysAgo } },
       }),
     ]);
 
@@ -138,30 +138,27 @@ export class AdminService {
         totalUsers: { value: totalUsers, trend: '+5%' },
         totalOrders: { value: totalOrders, trend: orderTrend },
         totalRevenue: { value: revenueAgg._sum.total || 0, trend: revTrend },
-        pendingOrders: { value: pendingOrders, trend: '-2%' },
-        activeVendors: { value: activeVendors, trend: '' },
-        pendingDrivers: { value: pendingDrivers, trend: '' },
+        pendingOrders: { value: pendingOrders, trend: '' },
         activeOrders: { value: activeOrdersCount },
         onlineDrivers: { value: onlineDriversCount },
         openRestaurants: { value: openRestaurantsCount },
       },
-      recentOrders: recentOrdersList.map(o => ({
-        id: o.id.slice(0, 8).toUpperCase(),
+      recentOrders: recentOrdersList.map((o: any) => ({
+        id: o.firebaseOrderId || o.id.slice(0, 8),
         customer: o.customer?.name || 'Unknown',
         vendor: o.restaurant?.name || 'Unknown',
-        status: o.status,
         amount: o.total,
+        status: o.status,
         date: o.createdAt,
       })),
-      topVendors: topVendors.map(v => ({
+      topVendors: topVendors.map((v: any) => ({
         id: v.id,
         name: v.name,
-        type: v.vendorType || 'Restaurant',
         rating: v.rating,
         ordersCount: v._count.orders,
-        revenue: v.walletBalance,
+        revenue: v.totalEarnings,
       })),
-      revenueChart: Object.entries(revenueChart).map(([date, revenue]) => ({ date, revenue })),
+      revenueChart: monthlyRevenueHistory,
       distributions: {
         roles: userRolesMap,
         orderStatuses: orderStatusesMap,
@@ -843,17 +840,15 @@ export class AdminService {
         orderBy: { createdAt: 'desc' },
         take: 50,
       }),
-      // Vendors with balances
+      // Vendors (All, to show they exist)
       this.prisma.restaurant.findMany({
-        where: { pendingBalance: { gt: 0 } },
         select: { id: true, name: true, pendingBalance: true, ownerId: true },
-        orderBy: { pendingBalance: 'desc' },
+        orderBy: { name: 'asc' },
       }),
-      // Drivers with balances (Looking at totalEarnings - debtBalance OR just totalEarnings)
+      // Drivers (All, to show they exist)
       this.prisma.driverProfile.findMany({
-        where: { totalEarnings: { gt: 0 } },
-        include: { user: { select: { id: true, name: true } } },
-        orderBy: { totalEarnings: 'desc' },
+        include: { user: { select: { id: true, name: true, walletBalance: true } } },
+        orderBy: { user: { name: 'asc' } },
       }),
       // Pending Earning entries
       this.prisma.ledger.findMany({
@@ -865,21 +860,22 @@ export class AdminService {
     ]);
 
     return {
-      stats: {
-        appEarnings: Number(appEarnings._sum.appShare || 0) + Number(appEarnings._sum.serviceFee || 0),
-        vendorEarnings: Number(vendorEarnings._sum.totalEarnings || 0),
-        driverEarnings: Number(driverEarnings._sum.totalEarnings || 0),
+      earnings: {
+        app: Number(appEarnings._sum.appShare || 0) + Number(appEarnings._sum.serviceFee || 0),
+        vendors: Number(vendorEarnings._sum.totalEarnings || 0),
+        drivers: Number(driverEarnings._sum.totalEarnings || 0),
         totalVolume: Number(appEarnings._sum.appShare || 0) + Number(vendorEarnings._sum.totalEarnings || 0) + Number(driverEarnings._sum.totalEarnings || 0),
       },
-      recentPayouts: payouts,
-      topVendors: vendors,
-      topDrivers: drivers.map((d: any) => ({
+      payouts: payouts,
+      vendors: vendors,
+      drivers: drivers.map((d: any) => ({
         id: d.id,
         name: d.user?.name || 'Unknown',
-        balance: (d.totalEarnings || 0) - (d.debtBalance || 0),
+        balance: d.user?.walletBalance || 0,
+        debt: d.debtBalance || 0,
         totalEarnings: d.totalEarnings || 0
       })),
-      pendingTransactions: pendingEarnings,
+      pendingEarnings: pendingEarnings,
     };
   }
 

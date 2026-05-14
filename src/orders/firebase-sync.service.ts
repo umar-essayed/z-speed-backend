@@ -774,17 +774,26 @@ export class FirebaseSyncService implements OnModuleInit {
     this.logger.log(`💰 Processing earnings for delivered order ${order.id}`);
     
     try {
-      const restaurantShare = order.subtotal;
+      // 1. Get System Config for commissions
+      const config = await this.prisma.systemConfig.findFirst() || { defaultAppCommissionRate: 0.20 };
+      const commissionRate = config.defaultAppCommissionRate;
+
+      // 2. Calculate Shares
+      const appCommission = order.subtotal * commissionRate;
+      const restaurantShare = order.subtotal - appCommission;
       const driverShare = order.deliveryFee + (order.driverBoost || 0) + (order.tips || 0);
-      const appShare = order.serviceFee;
+      const appShare = appCommission + (order.serviceFee || 0);
+      
       const isCash = order.paymentMethod === 'CASH';
       const cashCollected = isCash ? order.total : 0;
 
-      // Update Order financials
+      this.logger.log(`📊 Order ${order.id} Breakdown: Resto: ${restaurantShare}, Driver: ${driverShare}, App: ${appShare}, Cash: ${cashCollected}`);
+
+      // 3. Update Order financials
       await this.prisma.order.update({
         where: { id: order.id },
         data: {
-          appCommission: 0,
+          appCommission,
           restaurantShare,
           driverShare,
           appShare,
@@ -792,7 +801,7 @@ export class FirebaseSyncService implements OnModuleInit {
         }
       });
 
-      // Update Restaurant Earnings
+      // 4. Update Restaurant Earnings
       if (order.restaurantId) {
         await this.prisma.restaurant.update({
           where: { id: order.restaurantId },
@@ -803,7 +812,7 @@ export class FirebaseSyncService implements OnModuleInit {
         });
 
         // Ledger for restaurant owner
-        if (order.restaurant.ownerId) {
+        if (order.restaurant?.ownerId) {
           await this.prisma.ledger.create({
             data: {
               userId: order.restaurant.ownerId,
@@ -822,11 +831,19 @@ export class FirebaseSyncService implements OnModuleInit {
         }
       }
 
-      // Update Driver Earnings & Debt
+      // 5. Update Driver Earnings & Debt
       if (order.driverId) {
-        const driver = await this.prisma.driverProfile.findUnique({ where: { id: order.driverId } });
+        const driver = await this.prisma.driverProfile.findUnique({ 
+          where: { id: order.driverId },
+          include: { user: true }
+        });
+        
         if (driver) {
+          // If cash, debt increases by what they collected minus their share
+          // If online, their wallet balance increases by their share
           const debtIncrease = isCash ? (cashCollected - driverShare) : 0;
+          const walletIncrease = isCash ? 0 : driverShare;
+
           await this.prisma.driverProfile.update({
             where: { id: order.driverId },
             data: {
@@ -835,6 +852,13 @@ export class FirebaseSyncService implements OnModuleInit {
               totalTrips: { increment: 1 },
             },
           });
+
+          if (walletIncrease > 0) {
+            await this.prisma.user.update({
+              where: { id: driver.userId },
+              data: { walletBalance: { increment: walletIncrease } }
+            });
+          }
 
           // Ledger for driver
           await this.prisma.ledger.create({

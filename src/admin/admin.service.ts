@@ -1,9 +1,11 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { FirebaseAdminService } from '../firebase/firebase-admin.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AccountStatus, Role, OrderStatus, LedgerType } from '@prisma/client';
 import { SignatureUtil } from '../wallet/signature.util';
+import * as bcrypt from 'bcrypt';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class AdminService {
@@ -319,6 +321,51 @@ export class AdminService {
       where: { id },
       data: { status: status.toUpperCase() as any },
     });
+  }
+
+  async updateUserRole(adminId: string, targetUserId: string, newRole: string) {
+    // 1. Verify admin is SuperAdmin
+    const admin = await this.prisma.user.findUnique({ where: { id: adminId } });
+    if (!admin || admin.role !== Role.SUPERADMIN) {
+      throw new ForbiddenException('Only SuperAdmin can change user roles');
+    }
+
+    // 2. Prevent self-role change
+    if (adminId === targetUserId) {
+      throw new BadRequestException('You cannot change your own role');
+    }
+
+    const user = await this.prisma.user.findUnique({ where: { id: targetUserId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    const validRoles = Object.values(Role);
+    if (!validRoles.includes(newRole.toUpperCase() as any)) {
+      throw new BadRequestException(`Invalid role. Must be one of: ${validRoles.join(', ')}`);
+    }
+
+    return this.prisma.user.update({
+      where: { id: targetUserId },
+      data: { role: newRole.toUpperCase() as any },
+    });
+  }
+
+  async resetUserPassword(targetUserId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: targetUserId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    // Generate strong random password
+    const newPassword = crypto.randomBytes(8).toString('hex'); // 16 chars hex
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    await this.prisma.user.update({
+      where: { id: targetUserId },
+      data: { password: hashedPassword },
+    });
+
+    return { 
+      message: 'Password reset successfully',
+      newPassword: newPassword 
+    };
   }
 
   async deleteUser(id: string) {

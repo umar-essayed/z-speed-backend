@@ -17,6 +17,8 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { Role } from '@prisma/client';
 
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+
 @Controller('admin')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(Role.ADMIN, Role.SUPERADMIN)
@@ -58,6 +60,20 @@ export class AdminController {
     @Body('status') status: string,
   ) {
     return this.adminService.updateUserStatus(id, status);
+  }
+
+  @Patch('users/:id/role')
+  async updateUserRole(
+    @Param('id') id: string,
+    @Body('role') role: string,
+    @CurrentUser() currentUser: any,
+  ) {
+    return this.adminService.updateUserRole(currentUser.id, id, role);
+  }
+
+  @Patch('users/:id/reset-password')
+  async resetUserPassword(@Param('id') id: string) {
+    return this.adminService.resetUserPassword(id);
   }
 
   @Delete('users/:id')

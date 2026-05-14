@@ -280,6 +280,8 @@ export class AdminController {
   @Get('map-data')
   async getMapData() {
     return this.adminService.getMapData();
+  }
+
   @Get('reconcile')
   async reconcileFinancials() {
     return this.adminService.reconcileFinancials();

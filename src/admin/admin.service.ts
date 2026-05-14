@@ -37,8 +37,8 @@ export class AdminService {
           action,
           targetTable,
           targetId,
-          newData: newData ? JSON.stringify(newData) : null,
-          oldData: oldData ? JSON.stringify(oldData) : null,
+          newData: newData || {},
+          oldData: oldData || {},
         },
       });
     } catch (err) {
@@ -1409,6 +1409,8 @@ export class AdminService {
       restaurants, 
       heatmap: recentOrders.map(o => [o.deliveryLat, o.deliveryLng, 0.5]) // [lat, lng, intensity]
     };
+  }
+
   async reconcileFinancials() {
     const [drivers, restaurants] = await Promise.all([
       this.prisma.driverProfile.findMany({ include: { user: { select: { walletBalance: true } } } }),

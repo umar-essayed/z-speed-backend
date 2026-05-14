@@ -32,10 +32,12 @@ import { MailerService } from './mailer.service';
             tls: {
               rejectUnauthorized: false,
             },
-            pool: true, // Use pooling
+            pool: true,
             connectionTimeout: 10000,
             greetingTimeout: 10000,
             socketTimeout: 10000,
+            debug: true, // Enable debug logs
+            logger: true, // Log to console
           },
           defaults: {
             from: `"${config.get('MAIL_FROM_NAME') || 'Z-SPEED'}" <${config.get('MAIL_FROM') || user}>`,

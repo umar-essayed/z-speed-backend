@@ -929,4 +929,31 @@ export class AdminService {
 
     return { drivers, restaurants, firebaseApplications };
   }
+
+  async getMapData() {
+    const [drivers, restaurants] = await Promise.all([
+      this.prisma.driverProfile.findMany({
+        where: { isAvailable: true, status: 'ACTIVE' },
+        include: {
+          user: { select: { id: true, name: true, phone: true } },
+          vehicle: true,
+        },
+      }),
+      this.prisma.restaurant.findMany({
+        select: {
+          id: true,
+          name: true,
+          nameAr: true,
+          latitude: true,
+          longitude: true,
+          status: true,
+          isOpen: true,
+          vendorType: true,
+          logoUrl: true,
+        },
+      }),
+    ]);
+
+    return { drivers, restaurants };
+  }
 }

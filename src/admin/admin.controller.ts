@@ -215,4 +215,9 @@ export class AdminController {
   async getPendingApplications() {
     return this.adminService.getPendingApplications();
   }
+
+  @Get('map-data')
+  async getMapData() {
+    return this.adminService.getMapData();
+  }
 }

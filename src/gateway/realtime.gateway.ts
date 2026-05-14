@@ -87,17 +87,21 @@ export class RealtimeGateway
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { lat: number; lng: number; orderId?: string },
   ) {
+    const payload = {
+      driverId: client.data.userId,
+      lat: data.lat,
+      lng: data.lng,
+      orderId: data.orderId,
+      timestamp: new Date(),
+    };
+
     if (data.orderId) {
-      // Broadcast to the customer tracking this order
-      this.server
-        .to(`order:${data.orderId}`)
-        .emit('driver:location', {
-          driverId: client.data.userId,
-          lat: data.lat,
-          lng: data.lng,
-          timestamp: new Date(),
-        });
+      // Broadcast to the customer tracking this specific order
+      this.server.to(`order:${data.orderId}`).emit('driver:location', payload);
     }
+
+    // Broadcast to admins for the Live Map
+    this.server.to('admins').emit('admin:driver_location', payload);
   }
 
   /**

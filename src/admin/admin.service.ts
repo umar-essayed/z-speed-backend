@@ -117,29 +117,40 @@ export class AdminService {
     }
 
     // Monthly revenue chart (last 7 days)
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+    const sevenDaysAgo = new Date(today);
+    sevenDaysAgo.setDate(today.getDate() - 6);
+    
     const ordersLast7Days = await this.prisma.order.findMany({
-      where: { status: 'DELIVERED', createdAt: { gte: sevenDaysAgo } },
+      where: { 
+        status: OrderStatus.DELIVERED, 
+        createdAt: { gte: sevenDaysAgo } 
+      },
       select: { createdAt: true, total: true },
     });
 
     const revenueChart: Record<string, number> = {};
     for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
       const key = d.toISOString().split('T')[0];
       revenueChart[key] = 0;
     }
+
     ordersLast7Days.forEach(o => {
       const key = o.createdAt.toISOString().split('T')[0];
-      if (revenueChart[key] !== undefined) revenueChart[key] += o.total;
+      if (revenueChart[key] !== undefined) {
+        revenueChart[key] += Number(o.total || 0);
+      }
     });
 
-    const thisMonthRev = monthlyRevenue._sum.total || 0;
-    const lastMonthRev = lastMonthRevenue._sum.total || 0;
+    const monthlyRevenueHistory = Object.entries(revenueChart)
+      .map(([date, revenue]) => ({ date, revenue }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    const thisMonthRev = Number(monthlyRevenue?._sum?.total || 0);
+    const lastMonthRev = Number(lastMonthRevenue?._sum?.total || 0);
     const revTrend = lastMonthRev > 0 ? (((thisMonthRev - lastMonthRev) / lastMonthRev) * 100).toFixed(1) + '%' : '+0%';
-    const orderTrend = lastMonthOrders > 0 ? (((monthlyOrders - lastMonthOrders) / lastMonthOrders) * 100).toFixed(1) + '%' : '+0%';
+    const orderTrend = lastMonthOrders > 0 ? (((Number(monthlyOrders || 0) - Number(lastMonthOrders || 0)) / Number(lastMonthOrders || 0)) * 100).toFixed(1) + '%' : '+0%';
 
     // Role and Status distributions
     const [userRoles, orderStatuses] = await Promise.all([

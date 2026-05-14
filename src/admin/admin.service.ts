@@ -800,6 +800,7 @@ export class AdminService {
     const db = this.firebase.getFirestore();
     if (!db) return [];
 
+    try {
       const snapshot = await db.collection('driver_applications').get();
       const applications: any[] = [];
 

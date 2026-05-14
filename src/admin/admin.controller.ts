@@ -163,8 +163,22 @@ export class AdminController {
     @Query('page') page?: number,
     @Query('limit') limit?: number,
     @Query('status') status?: string,
+    @Query('search') search?: string,
   ) {
-    return this.adminService.getAllOrders({ page, limit, status });
+    return this.adminService.getAllOrders({ page, limit, status, search });
+  }
+
+  @Get('orders/:id')
+  async getOrderById(@Param('id') id: string) {
+    return this.adminService.getOrderById(id);
+  }
+
+  @Get('transactions/export')
+  async exportTransactions(
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    return this.adminService.exportTransactionsCsv({ startDate, endDate });
   }
 
   // =============================================

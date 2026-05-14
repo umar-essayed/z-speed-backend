@@ -22,6 +22,7 @@ export class FirebaseSyncService implements OnModuleInit {
 
   onModuleInit() {
     this.startListening();
+    this.initialSyncAddresses();
   }
 
   private startListening() {
@@ -101,7 +102,16 @@ export class FirebaseSyncService implements OnModuleInit {
       this.logger.error('Error listening to Firebase delivery requests:', error);
     });
 
-    // 7. Initial syncs are handled automatically by onSnapshot when it first attaches
+    // 7. Listen for User Addresses (Collection Group)
+    firestore.collectionGroup('addresses').onSnapshot(async (snapshot) => {
+      for (const change of snapshot.docChanges()) {
+        await this.syncUserAddress(change.doc);
+      }
+    }, (error) => {
+      this.logger.error('Error listening to Firebase user addresses:', error);
+    });
+
+    // 8. Initial syncs are handled automatically by onSnapshot when it first attaches
   }
 
   private async syncOrder(doc: any, silent = false) {
@@ -587,6 +597,69 @@ export class FirebaseSyncService implements OnModuleInit {
     }
   }
 
+  private async syncUserAddress(doc: any) {
+    const data = doc.data();
+    const path = doc.ref.path; // e.g., users/USER_UID/addresses/ADDR_ID
+    const pathParts = path.split('/');
+    const fbUserId = pathParts[1];
+
+    try {
+      const user = await this.prisma.user.findFirst({
+        where: { firebaseUid: fbUserId }
+      });
+
+      if (!user) return;
+
+      await this.prisma.address.upsert({
+        where: { id: doc.id }, // Assuming doc.id is the UUID used in Postgres or we use a mapping
+        update: {
+          label: data.label || data.name || null,
+          street: data.street || data.address || 'Synced Address',
+          building: data.building || null,
+          floor: data.floor || null,
+          apartment: data.apartment || null,
+          city: data.city || 'Cairo',
+          latitude: data.latitude || data.lat || 0,
+          longitude: data.longitude || data.lng || 0,
+          isDefault: data.isDefault || false,
+          type: data.type || 'home',
+        },
+        create: {
+          id: doc.id,
+          userId: user.id,
+          label: data.label || data.name || null,
+          street: data.street || data.address || 'Synced Address',
+          building: data.building || null,
+          floor: data.floor || null,
+          apartment: data.apartment || null,
+          city: data.city || 'Cairo',
+          latitude: data.latitude || data.lat || 0,
+          longitude: data.longitude || data.lng || 0,
+          isDefault: data.isDefault || false,
+          type: data.type || 'home',
+        }
+      });
+    } catch (error) {
+      // Quiet fail to prevent log spam
+    }
+  }
+
+  private async initialSyncAddresses() {
+    this.logger.log('Performing initial sync of all Firebase user addresses...');
+    const firestore = this.firebaseAdmin.getFirestore();
+    if (!firestore) return;
+
+    try {
+      const snapshot = await firestore.collectionGroup('addresses').get();
+      for (const doc of snapshot.docs) {
+        await this.syncUserAddress(doc);
+      }
+      this.logger.log(`✅ Initial address sync completed: ${snapshot.size} addresses processed.`);
+    } catch (error) {
+      this.logger.error('Failed during initial address sync:', error);
+    }
+  }
+
   // Initial sync for Menu (Sections and Items)
   private async initialSyncMenu() {
     this.logger.log('Performing initial sync of all Firebase menu sections and items...');
@@ -737,7 +810,7 @@ export class FirebaseSyncService implements OnModuleInit {
               orderId: order.id,
               type: 'EARNING',
               amount: restaurantShare,
-              status: 'pending',
+              status: 'completed',
               signature: SignatureUtil.signLedgerEntry({
                 userId: order.restaurant.ownerId,
                 orderId: order.id,

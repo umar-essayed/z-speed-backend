@@ -228,14 +228,45 @@ export class AdminService {
       where: { id },
       include: {
         addresses: true,
-        driverProfile: { include: { vehicle: true } },
+        driverProfile: { 
+          include: { 
+            vehicle: true,
+            orders: { 
+              take: 10, 
+              orderBy: { createdAt: 'desc' },
+              include: { restaurant: { select: { name: true } }, driver: { include: { user: { select: { name: true } } } } }
+            }
+          } 
+        },
         ownedRestaurants: true,
         ledgers: { orderBy: { createdAt: 'desc' } },
-        orders: { take: 5, orderBy: { createdAt: 'desc' } },
+        orders: { 
+          take: 10, 
+          orderBy: { createdAt: 'desc' },
+          include: { restaurant: { select: { name: true } }, driver: { include: { user: { select: { name: true } } } } }
+        },
       },
     });
+
     if (!user) throw new NotFoundException('User not found');
-    return user;
+
+    // Merge orders if user is a driver
+    const driverOrders = user.driverProfile?.orders || [];
+    const customerOrders = user.orders || [];
+    
+    // Sort merged orders by date
+    const allOrders = [...customerOrders, ...driverOrders]
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, 10);
+
+    return {
+      ...user,
+      orders: allOrders,
+      // Aggregated Financial Info for the UI
+      businessBalance: user.ownedRestaurants?.reduce((sum, r) => sum + (r.walletBalance || 0) + (r.pendingBalance || 0), 0) || 0,
+      driverEarnings: user.driverProfile?.totalEarnings || 0,
+      driverDebt: user.driverProfile?.debtBalance || 0,
+    };
   }
 
   async updateUserStatus(id: string, status: string) {
@@ -386,11 +417,11 @@ export class AdminService {
       } else if (s === 'APPROVED') {
         where.status = AccountStatus.ACTIVE;
       } else {
+        // Fallback for direct status matches
         where.status = s as any;
       }
-    } else if (!status) {
-      where.status = AccountStatus.PENDING_VERIFICATION;
     }
+    // If status is 'all', we don't apply any status filter
 
     if (vendorType && vendorType !== 'all') {
       const t = vendorType.toUpperCase();
@@ -446,7 +477,18 @@ export class AdminService {
     const { page = 1, limit = 20, type, status, search } = filters;
     const where: any = {};
 
-    if (type && type !== 'all') where.vendorType = type.toUpperCase();
+    if (type && type !== 'all') {
+      const t = type.toUpperCase();
+      if (t === 'RESTAURANT') {
+        where.OR = [{ vendorType: 'RESTAURANT' }, { vendorType: 'FOOD' }, { vendorType: null }];
+      } else if (t === 'MARKET') {
+        where.OR = [{ vendorType: 'MARKET' }, { vendorType: 'GROCERY' }, { vendorType: 'SUPERMARKET' }];
+      } else if (t === 'PHARMACY') {
+        where.OR = [{ vendorType: 'PHARMACY' }, { vendorType: 'MEDICINE' }];
+      } else {
+        where.vendorType = t;
+      }
+    }
     if (status && status !== 'all') where.status = status.toUpperCase();
     if (search) {
       where.OR = [
@@ -711,10 +753,21 @@ export class AdminService {
   // ORDERS
   // =============================================
 
-  async getAllOrders(filters: { page?: number; limit?: number; status?: string }) {
-    const { page = 1, limit = 20, status } = filters;
+  async getAllOrders(filters: { page?: number; limit?: number; status?: string; search?: string }) {
+    const { page = 1, limit = 20, status, search } = filters;
     const where: any = {};
     if (status && status !== 'all') where.status = status.toUpperCase();
+
+    if (search) {
+      where.OR = [
+        { id: { contains: search, mode: 'insensitive' } },
+        { firebaseOrderId: { contains: search, mode: 'insensitive' } },
+        { customer: { name: { contains: search, mode: 'insensitive' } } },
+        { customer: { phone: { contains: search, mode: 'insensitive' } } },
+        { restaurant: { name: { contains: search, mode: 'insensitive' } } },
+        { driver: { user: { name: { contains: search, mode: 'insensitive' } } } },
+      ];
+    }
 
     const [data, total] = await Promise.all([
       this.prisma.order.findMany({
@@ -723,9 +776,10 @@ export class AdminService {
         take: limit,
         orderBy: { createdAt: 'desc' },
         include: {
-          customer: { select: { name: true, email: true, phone: true } },
-          restaurant: { select: { name: true } },
-          driver: { include: { user: { select: { name: true } } } },
+          customer: { select: { id: true, name: true, email: true, phone: true } },
+          restaurant: { select: { id: true, name: true, logoUrl: true } },
+          driver: { include: { user: { select: { id: true, name: true, phone: true } } } },
+          items: { include: { foodItem: true } },
         },
       }),
       this.prisma.order.count({ where }),
@@ -738,6 +792,20 @@ export class AdminService {
       limit: Number(limit),
       totalPages: Math.ceil(total / limit),
     };
+  }
+
+  async getOrderById(id: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id },
+      include: {
+        customer: { select: { id: true, name: true, email: true, phone: true, profileImage: true } },
+        restaurant: { select: { id: true, name: true, logoUrl: true, address: true, city: true, owner: { select: { name: true, phone: true } } } },
+        driver: { include: { user: { select: { id: true, name: true, phone: true, profileImage: true } }, vehicle: true } },
+        items: { include: { foodItem: true } },
+      },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+    return order;
   }
 
   // =============================================
@@ -780,11 +848,11 @@ export class AdminService {
         select: { id: true, name: true, pendingBalance: true, ownerId: true },
         orderBy: { pendingBalance: 'desc' },
       }),
-      // Drivers with balances
-      this.prisma.user.findMany({
-        where: { role: Role.DRIVER, walletBalance: { gt: 0 } },
-        select: { id: true, name: true, walletBalance: true },
-        orderBy: { walletBalance: 'desc' },
+      // Drivers with balances (Looking at totalEarnings - debtBalance OR just totalEarnings)
+      this.prisma.driverProfile.findMany({
+        where: { totalEarnings: { gt: 0 } },
+        include: { user: { select: { id: true, name: true } } },
+        orderBy: { totalEarnings: 'desc' },
       }),
       // Pending Earning entries
       this.prisma.ledger.findMany({
@@ -796,16 +864,59 @@ export class AdminService {
     ]);
 
     return {
-      earnings: {
-        app: (appEarnings._sum.appShare || 0) + (appEarnings._sum.serviceFee || 0),
-        vendors: vendorEarnings._sum.totalEarnings || 0,
-        drivers: driverEarnings._sum.totalEarnings || 0,
+      stats: {
+        appEarnings: Number(appEarnings._sum.appShare || 0) + Number(appEarnings._sum.serviceFee || 0),
+        vendorEarnings: Number(vendorEarnings._sum.totalEarnings || 0),
+        driverEarnings: Number(driverEarnings._sum.totalEarnings || 0),
+        totalVolume: Number(appEarnings._sum.appShare || 0) + Number(vendorEarnings._sum.totalEarnings || 0) + Number(driverEarnings._sum.totalEarnings || 0),
       },
-      payouts,
-      vendors,
-      drivers,
-      pendingEarnings,
+      recentPayouts: payouts,
+      topVendors: vendors,
+      topDrivers: drivers.map(d => ({
+        id: d.id,
+        name: d.user.name,
+        balance: d.totalEarnings - d.debtBalance,
+        totalEarnings: d.totalEarnings
+      })),
+      pendingTransactions: pendingEarnings,
     };
+  }
+
+  async exportTransactionsCsv(filters: { startDate?: string; endDate?: string }) {
+    const { startDate, endDate } = filters;
+    const where: any = {};
+    if (startDate || endDate) {
+      where.createdAt = {};
+      if (startDate) where.createdAt.gte = new Date(startDate);
+      if (endDate) where.createdAt.lte = new Date(endDate);
+    }
+
+    const ledgers = await this.prisma.ledger.findMany({
+      where,
+      include: { user: { select: { name: true, role: true } }, order: { select: { firebaseOrderId: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // Create CSV header
+    let csv = 'ID,Date,User,Role,Type,Amount,Status,Order ID,Description\n';
+
+    // Add rows
+    for (const l of ledgers) {
+      const row = [
+        l.id,
+        l.createdAt.toISOString(),
+        `"${l.user.name}"`,
+        l.user.role,
+        l.type,
+        l.amount,
+        l.status,
+        l.order?.firebaseOrderId || '',
+        `"${l.description || ''}"`,
+      ].join(',');
+      csv += row + '\n';
+    }
+
+    return csv;
   }
 
   // =============================================
@@ -892,11 +1003,27 @@ export class AdminService {
   }
 
   async updateSettings(dto: any) {
-    return this.prisma.systemConfig.upsert({
+    const config = await this.prisma.systemConfig.upsert({
       where: { id: 'default' },
       create: { id: 'default', ...dto },
       update: dto,
     });
+
+    // Sync to Firebase for mobile apps to pick up
+    const firestore = this.firebase.getFirestore();
+    if (firestore) {
+      try {
+        await firestore.collection('system_config').doc('default').set({
+          ...dto,
+          updatedAt: new Date(),
+        }, { merge: true });
+        this.logger.log('System settings synced to Firebase');
+      } catch (err) {
+        this.logger.error('Failed to sync settings to Firebase:', err);
+      }
+    }
+
+    return config;
   }
 
   // =============================================

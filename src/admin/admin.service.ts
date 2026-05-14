@@ -379,6 +379,16 @@ export class AdminService {
     };
   }
 
+  async updateOwnName(userId: string, newName: string) {
+    if (!newName || newName.trim().length < 2) {
+      throw new BadRequestException('Name must be at least 2 characters long');
+    }
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { name: newName.trim() },
+    });
+  }
+
   async deleteUser(id: string) {
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) throw new NotFoundException('User not found');

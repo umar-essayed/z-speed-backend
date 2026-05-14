@@ -76,6 +76,14 @@ export class AdminController {
     return this.adminService.resetUserPassword(id);
   }
 
+  @Patch('me/name')
+  async updateOwnName(
+    @Body('name') name: string,
+    @CurrentUser() currentUser: any,
+  ) {
+    return this.adminService.updateOwnName(currentUser.id, name);
+  }
+
   @Delete('users/:id')
   @HttpCode(HttpStatus.OK)
   async deleteUser(@Param('id') id: string) {

@@ -1494,11 +1494,10 @@ export class AdminService {
     const result = await this.reconcileFinancials();
     
     if (result.issuesFound > 0) {
-      await this.notifications.sendTelegramAlert(
-        `🚨 *Financial Discrepancy Found*\n` +
-        `- Total Checked: ${result.totalChecked}\n` +
-        `- Issues Found: ${result.issuesFound}\n` +
-        `Please check the admin panel for details.`
+      await this.notifications.sendAdminAlert(
+        'Financial Discrepancy Found',
+        `Audit found ${result.issuesFound} discrepancies in user wallets. Total Checked: ${result.totalChecked}.`,
+        { result }
       );
     } else {
       this.logger.log('Daily financial reconciliation completed: No issues found.');
@@ -1515,10 +1514,10 @@ export class AdminService {
     // Check for high volume of pending orders (> 20)
     const pendingCount = await this.prisma.order.count({ where: { status: OrderStatus.PENDING } });
     if (pendingCount > 20) {
-      await this.notifications.sendTelegramAlert(
-        `⚠️ *High Pending Order Volume*\n` +
-        `- Current Pending: ${pendingCount}\n` +
-        `Please check if drivers are available or if there is a system delay.`
+      await this.notifications.sendAdminAlert(
+        'High Pending Order Volume',
+        `There are currently ${pendingCount} pending orders. System may be overloaded or drivers unavailable.`,
+        { pendingCount }
       );
     }
 

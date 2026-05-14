@@ -102,8 +102,8 @@ export class AdminService {
       const db = this.firebase.getFirestore();
       if (db) {
         const [fbVendors, fbDrivers] = await Promise.all([
-          db.collection('vendor_applications').where('status', '==', 'pending').get(),
-          db.collection('driver_applications').where('status', '==', 'pending').get(),
+          db.collection('vendor_applications').where('status', 'in', ['pending', 'PENDING']).get(),
+          db.collection('driver_applications').where('status', 'in', ['pending', 'PENDING']).get(),
         ]);
         fbPendingCount = fbVendors.size + fbDrivers.size;
       }
@@ -658,7 +658,9 @@ export class AdminService {
     try {
       let query: any = db.collection('vendor_applications');
       if (status && status !== 'all') {
-        query = query.where('status', '==', status.toLowerCase());
+        const s = status.toLowerCase();
+        // Try to handle both "pending" and "PENDING" etc.
+        query = query.where('status', 'in', [s, s.toUpperCase()]);
       }
 
       const snapshot = await query.orderBy('createdAt', 'desc').get();
@@ -794,7 +796,8 @@ export class AdminService {
     try {
       let query: any = db.collection('driver_applications');
       if (status && status !== 'all') {
-        query = query.where('status', '==', status.toLowerCase());
+        const s = status.toLowerCase();
+        query = query.where('status', 'in', [s, s.toUpperCase()]);
       }
 
       const snapshot = await query.orderBy('createdAt', 'desc').get();
@@ -840,7 +843,7 @@ export class AdminService {
     if (data.userId) {
       const user = await this.prisma.user.findUnique({ where: { id: data.userId } });
       if (user) {
-        await this.prisma.driverProfile.upsert({
+        const profile = await this.prisma.driverProfile.upsert({
           where: { userId: data.userId },
           update: { applicationStatus: 'APPROVED' as any, isAvailable: true },
           create: { userId: data.userId, applicationStatus: 'APPROVED' as any, isAvailable: true }
@@ -849,7 +852,7 @@ export class AdminService {
         if (data.vehicle) {
           await this.prisma.vehicle.create({
             data: {
-              driverId: data.userId,
+              driverProfileId: profile.id,
               type: data.vehicle.type || 'BIKE',
               make: data.vehicle.make || 'Unknown',
               model: data.vehicle.model || 'Unknown',
@@ -1245,32 +1248,6 @@ export class AdminService {
       this.prisma.auditLog.count(),
     ]);
     return { data, total, page: Number(page), limit: Number(limit) };
-  }
-
-  // =============================================
-  // PENDING APPLICATIONS (combined)
-  // =============================================
-
-  async getPendingApplications() {
-    const drivers = await this.prisma.driverProfile.findMany({
-      where: { applicationStatus: 'PENDING' as any },
-      include: { user: true },
-    });
-
-    const restaurants = await this.prisma.restaurant.findMany({
-      where: { status: AccountStatus.PENDING_VERIFICATION },
-      include: { owner: true },
-    });
-
-    // Firebase vendor applications
-    let firebaseApplications: any[] = [];
-    try {
-      firebaseApplications = await this.getVendorApplicationsFromFirebase('pending');
-    } catch (err) {
-      this.logger.warn('Could not fetch Firebase applications: ' + err.message);
-    }
-
-    return { drivers, restaurants, firebaseApplications };
   }
 
   async getMapData() {

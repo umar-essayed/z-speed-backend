@@ -397,7 +397,19 @@ export class AdminService {
       if (t === 'RESTAURANT') {
         where.OR = [
           { vendorType: { equals: 'RESTAURANT', mode: 'insensitive' } },
+          { vendorType: { equals: 'FOOD', mode: 'insensitive' } },
           { vendorType: null },
+        ];
+      } else if (t === 'MARKET') {
+        where.OR = [
+          { vendorType: { equals: 'MARKET', mode: 'insensitive' } },
+          { vendorType: { equals: 'GROCERY', mode: 'insensitive' } },
+          { vendorType: { equals: 'SUPERMARKET', mode: 'insensitive' } },
+        ];
+      } else if (t === 'PHARMACY') {
+        where.OR = [
+          { vendorType: { equals: 'PHARMACY', mode: 'insensitive' } },
+          { vendorType: { equals: 'MEDICINE', mode: 'insensitive' } },
         ];
       } else {
         where.vendorType = { equals: t, mode: 'insensitive' };

@@ -1487,6 +1487,8 @@ export class AdminService {
       ).join('\n');
       return header + rows;
     }
+  }
+
   /**
    * Automate financial reconciliation every night at midnight.
    */

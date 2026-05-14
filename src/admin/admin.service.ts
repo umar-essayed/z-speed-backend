@@ -231,7 +231,7 @@ export class AdminService {
         driverProfile: { 
           include: { 
             vehicle: true,
-            orders: { 
+            deliveries: { 
               take: 10, 
               orderBy: { createdAt: 'desc' },
               include: { restaurant: { select: { name: true } }, driver: { include: { user: { select: { name: true } } } } }
@@ -250,22 +250,23 @@ export class AdminService {
 
     if (!user) throw new NotFoundException('User not found');
 
+    const u = user as any;
     // Merge orders if user is a driver
-    const driverOrders = user.driverProfile?.orders || [];
-    const customerOrders = user.orders || [];
+    const driverOrders = u.driverProfile?.deliveries || [];
+    const customerOrders = u.orders || [];
     
     // Sort merged orders by date
     const allOrders = [...customerOrders, ...driverOrders]
-      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .sort((a: any, b: any) => b.createdAt.getTime() - a.createdAt.getTime())
       .slice(0, 10);
 
     return {
       ...user,
       orders: allOrders,
       // Aggregated Financial Info for the UI
-      businessBalance: user.ownedRestaurants?.reduce((sum, r) => sum + (r.walletBalance || 0) + (r.pendingBalance || 0), 0) || 0,
-      driverEarnings: user.driverProfile?.totalEarnings || 0,
-      driverDebt: user.driverProfile?.debtBalance || 0,
+      businessBalance: u.ownedRestaurants?.reduce((sum: number, r: any) => sum + (r.walletBalance || 0) + (r.pendingBalance || 0), 0) || 0,
+      driverEarnings: u.driverProfile?.totalEarnings || 0,
+      driverDebt: u.driverProfile?.debtBalance || 0,
     };
   }
 
@@ -872,11 +873,11 @@ export class AdminService {
       },
       recentPayouts: payouts,
       topVendors: vendors,
-      topDrivers: drivers.map(d => ({
+      topDrivers: drivers.map((d: any) => ({
         id: d.id,
-        name: d.user.name,
-        balance: d.totalEarnings - d.debtBalance,
-        totalEarnings: d.totalEarnings
+        name: d.user?.name || 'Unknown',
+        balance: (d.totalEarnings || 0) - (d.debtBalance || 0),
+        totalEarnings: d.totalEarnings || 0
       })),
       pendingTransactions: pendingEarnings,
     };

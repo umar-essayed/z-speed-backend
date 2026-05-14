@@ -33,6 +33,7 @@ import { MailerService } from './mailer.service';
               rejectUnauthorized: false,
             },
             pool: true,
+            name: 'api.zspeedapp.com', // Explicitly set client hostname
             connectionTimeout: 10000,
             greetingTimeout: 10000,
             socketTimeout: 10000,

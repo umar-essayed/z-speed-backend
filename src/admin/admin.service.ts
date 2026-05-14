@@ -1311,7 +1311,7 @@ export class AdminService {
   }
 
   async getMapData() {
-    const [drivers, restaurants] = await Promise.all([
+    const [drivers, restaurants, recentOrders] = await Promise.all([
       this.prisma.driverProfile.findMany({
         where: { isAvailable: true, applicationStatus: 'APPROVED' },
         include: {
@@ -1332,8 +1332,21 @@ export class AdminService {
           logoUrl: true,
         },
       }),
+      this.prisma.order.findMany({
+        where: { 
+          createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }, // Last 24h
+          deliveryLat: { not: 0 },
+          deliveryLng: { not: 0 }
+        },
+        select: { deliveryLat: true, deliveryLng: true },
+        take: 500, // Limit for performance
+      }),
     ]);
 
-    return { drivers, restaurants };
+    return { 
+      drivers, 
+      restaurants, 
+      heatmap: recentOrders.map(o => [o.deliveryLat, o.deliveryLng, 0.5]) // [lat, lng, intensity]
+    };
   }
 }

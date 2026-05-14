@@ -854,12 +854,12 @@ export class AdminService {
       }),
       // Vendors (All, to show they exist)
       this.prisma.restaurant.findMany({
-        select: { id: true, name: true, pendingBalance: true, ownerId: true },
+        select: { id: true, name: true, pendingBalance: true, walletBalance: true, totalEarnings: true, ownerId: true },
         orderBy: { name: 'asc' },
       }),
       // Drivers (All, to show they exist)
       this.prisma.driverProfile.findMany({
-        include: { user: { select: { id: true, name: true, walletBalance: true } } },
+        select: { id: true, totalEarnings: true, debtBalance: true, user: { select: { id: true, name: true, walletBalance: true } } },
         orderBy: { user: { name: 'asc' } },
       }),
       // Pending Earning entries
@@ -879,19 +879,32 @@ export class AdminService {
         totalVolume: Number(appEarnings?._sum?.appShare || 0) + Number(vendorEarnings?._sum?.totalEarnings || 0) + Number(driverEarnings?._sum?.totalEarnings || 0),
       },
       payouts: payouts || [],
-      vendors: (vendors || []).map((v: any) => ({
-        id: v.id,
-        ownerId: v.ownerId,
-        name: v.name || 'Unknown',
-        pendingBalance: Number(v.pendingBalance || 0)
-      })),
-      drivers: (drivers || []).map((d: any) => ({
-        id: d.id,
-        name: d.user?.name || 'Unknown',
-        balance: Number(d.user?.walletBalance || 0),
-        debt: Number(d.debtBalance || 0),
-        totalEarnings: Number(d.totalEarnings || 0)
-      })),
+      vendors: (vendors || []).map((v: any) => {
+        const pBal = Number(v.pendingBalance || 0);
+        const wBal = Number(v.walletBalance || 0);
+        return {
+          id: v.id,
+          ownerId: v.ownerId,
+          name: v.name || 'Unknown',
+          pendingBalance: pBal,
+          walletBalance: wBal,
+          totalEarnings: Number(v.totalEarnings || 0),
+          balance: pBal + wBal,
+        };
+      }).sort((a, b) => b.balance - a.balance),
+      drivers: (drivers || []).map((d: any) => {
+        const wBal = Number(d.user?.walletBalance || 0);
+        const earnings = Number(d.totalEarnings || 0);
+        const debt = Number(d.debtBalance || 0);
+        return {
+          id: d.id,
+          name: d.user?.name || 'Unknown',
+          balance: wBal || (earnings - debt) || 0,
+          walletBalance: wBal,
+          debt: debt,
+          totalEarnings: earnings,
+        };
+      }).sort((a, b) => b.balance - a.balance),
       pendingEarnings: (pendingEarnings || []).map((le: any) => ({
         id: le.id,
         createdAt: le.createdAt,

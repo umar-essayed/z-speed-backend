@@ -848,7 +848,7 @@ export class AdminService {
       // Historical Payouts
       this.prisma.ledger.findMany({
         where: { type: { in: [LedgerType.WITHDRAWAL, LedgerType.PAYOUT] } },
-        include: { user: { select: { name: true, role: true, email: true } } },
+        include: { user: { select: { id: true, name: true, role: true, email: true } } },
         orderBy: { createdAt: 'desc' },
         take: 50,
       }),
@@ -898,6 +898,7 @@ export class AdminService {
         const debt = Number(d.debtBalance || 0);
         return {
           id: d.id,
+          userId: d.user?.id,
           name: d.user?.name || 'Unknown',
           balance: wBal || (earnings - debt) || 0,
           walletBalance: wBal,
@@ -911,6 +912,7 @@ export class AdminService {
         amount: Number(le.amount || 0),
         status: le.status,
         user: {
+          id: le.user?.id,
           name: le.user?.name || 'Unknown',
           role: le.user?.role || 'USER'
         }

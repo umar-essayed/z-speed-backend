@@ -101,11 +101,14 @@ export class AdminService {
     try {
       const db = this.firebase.getFirestore();
       if (db) {
-        const [fbVendors, fbDrivers] = await Promise.all([
-          db.collection('vendor_applications').where('status', 'in', ['pending', 'PENDING']).get(),
-          db.collection('driver_applications').where('status', 'in', ['pending', 'PENDING']).get(),
+        const [fbVendorsSnap, fbDriversSnap] = await Promise.all([
+          db.collection('vendor_applications').get(),
+          db.collection('driver_applications').get(),
         ]);
-        fbPendingCount = fbVendors.size + fbDrivers.size;
+        
+        const pendingVendors = fbVendorsSnap.docs.filter(d => (d.data().status || '').toLowerCase() === 'pending').length;
+        const pendingDrivers = fbDriversSnap.docs.filter(d => (d.data().status || '').toLowerCase() === 'pending').length;
+        fbPendingCount = pendingVendors + pendingDrivers;
       }
     } catch (err) {
       this.logger.warn('Failed to fetch FB pending counts: ' + err.message);
@@ -656,18 +659,17 @@ export class AdminService {
     }
 
     try {
-      let query: any = db.collection('vendor_applications');
-      if (status && status !== 'all') {
-        const s = status.toLowerCase();
-        // Try to handle both "pending" and "PENDING" etc.
-        query = query.where('status', 'in', [s, s.toUpperCase()]);
-      }
-
-      const snapshot = await query.orderBy('createdAt', 'desc').get();
+      const snapshot = await db.collection('vendor_applications').get();
       const applications: any[] = [];
 
       snapshot.forEach((doc: any) => {
         const data = doc.data();
+        const appStatus = (data.status || 'pending').toLowerCase();
+        
+        if (status && status !== 'all') {
+          if (appStatus !== status.toLowerCase()) return;
+        }
+
         applications.push({
           id: doc.id,
           source: 'firebase',
@@ -682,12 +684,17 @@ export class AdminService {
           documentUrls: data.documentUrls || [],
           logoUrl: data.logoUrl,
           userId: data.userId || data.uid,
-          createdAt: data.createdAt?.toDate?.() || new Date(),
+          createdAt: data.createdAt?.toDate?.() || new Date(data.createdAt || 0),
           rawData: data,
         });
       });
 
-      return applications;
+      // Sort in memory (descending)
+      return applications.sort((a, b) => {
+        const dateA = a.createdAt instanceof Date ? a.createdAt.getTime() : 0;
+        const dateB = b.createdAt instanceof Date ? b.createdAt.getTime() : 0;
+        return dateB - dateA;
+      });
     } catch (err) {
       this.logger.error('Failed to fetch vendor applications from Firebase:', err.message);
       return [];
@@ -793,18 +800,18 @@ export class AdminService {
     const db = this.firebase.getFirestore();
     if (!db) return [];
 
-    try {
-      let query: any = db.collection('driver_applications');
-      if (status && status !== 'all') {
-        const s = status.toLowerCase();
-        query = query.where('status', 'in', [s, s.toUpperCase()]);
-      }
-
-      const snapshot = await query.orderBy('createdAt', 'desc').get();
+      const snapshot = await db.collection('driver_applications').get();
       const applications: any[] = [];
 
       snapshot.forEach((doc: any) => {
         const data = doc.data();
+        const appStatus = (data.status || 'pending').toLowerCase();
+        
+        // Manual status filtering
+        if (status && status !== 'all') {
+          if (appStatus !== status.toLowerCase()) return;
+        }
+
         applications.push({
           id: doc.id,
           source: 'firebase',
@@ -816,12 +823,17 @@ export class AdminService {
           personal: data.personal || {},
           vehicle: data.vehicle || {},
           documents: data.documents || {},
-          createdAt: data.createdAt?.toDate?.() || new Date(),
+          createdAt: data.createdAt?.toDate?.() || new Date(data.createdAt || 0),
           rawData: data,
         });
       });
 
-      return applications;
+      // Sort in memory (descending)
+      return applications.sort((a, b) => {
+        const dateA = a.createdAt instanceof Date ? a.createdAt.getTime() : 0;
+        const dateB = b.createdAt instanceof Date ? b.createdAt.getTime() : 0;
+        return dateB - dateA;
+      });
     } catch (err) {
       this.logger.error('Failed to fetch driver applications from Firebase:', err.message);
       return [];

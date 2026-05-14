@@ -56,7 +56,7 @@ export class AdminService {
         where: { status: { notIn: [OrderStatus.DELIVERED, OrderStatus.CANCELLED, OrderStatus.RETURNED] } },
       }),
       this.prisma.driverProfile.count({
-        where: { isAvailable: true }, // or isOnline if you have it
+        where: { isAvailable: true }, 
       }),
       this.prisma.restaurant.count({
         where: { isOpen: true, status: AccountStatus.ACTIVE },
@@ -95,6 +95,21 @@ export class AdminService {
         where: { status: OrderStatus.DELIVERED, createdAt: { gte: lastMonthStart, lt: thirtyDaysAgo } },
       }),
     ]);
+
+    // Firebase pending applications count
+    let fbPendingCount = 0;
+    try {
+      const db = this.firebase.getFirestore();
+      if (db) {
+        const [fbVendors, fbDrivers] = await Promise.all([
+          db.collection('vendor_applications').where('status', '==', 'pending').get(),
+          db.collection('driver_applications').where('status', '==', 'pending').get(),
+        ]);
+        fbPendingCount = fbVendors.size + fbDrivers.size;
+      }
+    } catch (err) {
+      this.logger.warn('Failed to fetch FB pending counts: ' + err.message);
+    }
 
     // Monthly revenue chart (last 7 days)
     const sevenDaysAgo = new Date();
@@ -148,7 +163,7 @@ export class AdminService {
         totalUsers: { value: Number(totalUsers || 0), trend: '+5%' },
         totalOrders: { value: Number(totalOrders || 0), trend: orderTrend || '+0%' },
         totalRevenue: { value: Number(revenueAgg?._sum?.total || 0), trend: revTrend || '+0%' },
-        pendingOrders: { value: Number(pendingOrders || 0), trend: '' },
+        pendingOrders: { value: Number(pendingOrders || 0) + fbPendingCount, trend: '' },
         activeOrders: { value: Number(activeOrdersCount || 0) },
         onlineDrivers: { value: Number(onlineDriversCount || 0) },
         openRestaurants: { value: Number(openRestaurantsCount || 0) },
@@ -766,6 +781,146 @@ export class AdminService {
     }
 
     return { message: 'Firebase vendor application rejected' };
+  }
+
+  // =============================================
+  // FIREBASE — DRIVER APPLICATIONS
+  // =============================================
+
+  async getDriverApplicationsFromFirebase(status?: string) {
+    const db = this.firebase.getFirestore();
+    if (!db) return [];
+
+    try {
+      let query: any = db.collection('driver_applications');
+      if (status && status !== 'all') {
+        query = query.where('status', '==', status.toLowerCase());
+      }
+
+      const snapshot = await query.orderBy('createdAt', 'desc').get();
+      const applications: any[] = [];
+
+      snapshot.forEach((doc: any) => {
+        const data = doc.data();
+        applications.push({
+          id: doc.id,
+          source: 'firebase',
+          name: data.name || data.displayName,
+          email: data.email,
+          phone: data.phone,
+          status: data.status || 'pending',
+          userId: data.userId || data.uid,
+          personal: data.personal || {},
+          vehicle: data.vehicle || {},
+          documents: data.documents || {},
+          createdAt: data.createdAt?.toDate?.() || new Date(),
+          rawData: data,
+        });
+      });
+
+      return applications;
+    } catch (err) {
+      this.logger.error('Failed to fetch driver applications from Firebase:', err.message);
+      return [];
+    }
+  }
+
+  async approveFirebaseDriverApplication(applicationId: string) {
+    const db = this.firebase.getFirestore();
+    if (!db) throw new BadRequestException('Firebase not available');
+
+    const docRef = db.collection('driver_applications').doc(applicationId);
+    const doc = await docRef.get();
+    if (!doc.exists) throw new NotFoundException('Application not found');
+
+    const data = doc.data() as any;
+
+    await docRef.update({ status: 'approved', approvedAt: new Date() });
+
+    if (data.userId) {
+      const user = await this.prisma.user.findUnique({ where: { id: data.userId } });
+      if (user) {
+        await this.prisma.driverProfile.upsert({
+          where: { userId: data.userId },
+          update: { applicationStatus: 'APPROVED' as any, isAvailable: true },
+          create: { userId: data.userId, applicationStatus: 'APPROVED' as any, isAvailable: true }
+        });
+
+        if (data.vehicle) {
+          await this.prisma.vehicle.create({
+            data: {
+              driverId: data.userId,
+              type: data.vehicle.type || 'BIKE',
+              make: data.vehicle.make || 'Unknown',
+              model: data.vehicle.model || 'Unknown',
+              year: Number(data.vehicle.year) || 2024,
+              color: data.vehicle.color || 'Unknown',
+              plateNumber: data.vehicle.plateNumber || 'Unknown',
+            }
+          }).catch(() => {});
+        }
+
+        await this.prisma.user.update({ where: { id: data.userId }, data: { role: Role.DRIVER } });
+
+        try {
+          await this.notifications.createNotification(
+            data.userId,
+            'Driver Application Approved! 🚀',
+            'Your application has been approved. Welcome to Z-Speed!',
+            'driver_approved',
+          );
+        } catch {}
+      }
+    }
+
+    return { message: 'Driver application approved and synced' };
+  }
+
+  async rejectFirebaseDriverApplication(applicationId: string, reason?: string) {
+    const db = this.firebase.getFirestore();
+    if (!db) throw new BadRequestException('Firebase not available');
+
+    const docRef = db.collection('driver_applications').doc(applicationId);
+    await docRef.update({
+      status: 'rejected',
+      rejectionReason: reason || 'Requirements not met',
+      rejectedAt: new Date(),
+    });
+
+    return { message: 'Driver application rejected' };
+  }
+
+  async getPendingApplications() {
+    const [drivers, restaurants] = await Promise.all([
+      this.prisma.driverProfile.findMany({
+        where: { applicationStatus: 'PENDING' as any },
+        include: { user: true },
+      }),
+      this.prisma.restaurant.findMany({
+        where: { status: AccountStatus.PENDING_VERIFICATION },
+        include: { owner: true },
+      }),
+    ]);
+
+    // Firebase applications
+    let firebaseVendorApps: any[] = [];
+    let firebaseDriverApps: any[] = [];
+    
+    try {
+      [firebaseVendorApps, firebaseDriverApps] = await Promise.all([
+        this.getVendorApplicationsFromFirebase('pending'),
+        this.getDriverApplicationsFromFirebase('pending')
+      ]);
+    } catch (err) {
+      this.logger.warn('Could not fetch Firebase applications: ' + err.message);
+    }
+
+    return { 
+      drivers, 
+      restaurants, 
+      firebaseVendorApplications: firebaseVendorApps,
+      firebaseDriverApplications: firebaseDriverApps 
+    };
   }
 
   // =============================================

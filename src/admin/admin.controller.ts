@@ -155,6 +155,28 @@ export class AdminController {
   }
 
   // =============================================
+  // FIREBASE DRIVER APPLICATIONS
+  // =============================================
+
+  @Get('driver-applications')
+  async getDriverApplicationsFromFirebase(@Query('status') status?: string) {
+    return this.adminService.getDriverApplicationsFromFirebase(status);
+  }
+
+  @Patch('driver-applications/:id/approve')
+  async approveDriverApplication(@Param('id') id: string) {
+    return this.adminService.approveFirebaseDriverApplication(id);
+  }
+
+  @Patch('driver-applications/:id/reject')
+  async rejectDriverApplication(
+    @Param('id') id: string,
+    @Body('reason') reason?: string,
+  ) {
+    return this.adminService.rejectFirebaseDriverApplication(id, reason);
+  }
+
+  // =============================================
   // ORDERS
   // =============================================
 

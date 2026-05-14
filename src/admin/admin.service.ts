@@ -933,7 +933,7 @@ export class AdminService {
   async getMapData() {
     const [drivers, restaurants] = await Promise.all([
       this.prisma.driverProfile.findMany({
-        where: { isAvailable: true, status: 'ACTIVE' },
+        where: { isAvailable: true, applicationStatus: 'APPROVED' },
         include: {
           user: { select: { id: true, name: true, phone: true } },
           vehicle: true,

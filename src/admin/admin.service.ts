@@ -359,7 +359,7 @@ export class AdminService {
 
     await this.prisma.user.update({
       where: { id: targetUserId },
-      data: { password: hashedPassword },
+      data: { passwordHash: hashedPassword },
     });
 
     return { 

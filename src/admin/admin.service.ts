@@ -170,10 +170,6 @@ export class AdminService {
       orderStatusesMap[s.status as string] = Number(count || 0); 
     });
 
-    const monthlyRevenueHistory = Object.entries(revenueChart)
-      .map(([date, revenue]) => ({ date, revenue }))
-      .sort((a, b) => a.date.localeCompare(b.date));
-
     const result = {
       stats: {
         totalUsers: { value: Number(totalUsers || 0), trend: '+5%' },

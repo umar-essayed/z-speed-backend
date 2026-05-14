@@ -269,7 +269,7 @@ export class AuthService {
     } else {
       // Try to find by email in Supabase, or create a new user
       const { data: existingSbUsers } = await this.supabaseService.authAdmin.listUsers();
-      const sbUser = existingSbUsers?.users?.find((u) => u.email === email);
+      const sbUser = (existingSbUsers as any)?.users?.find((u: any) => u.email === email);
 
       if (sbUser) {
         supabaseUserId = sbUser.id;

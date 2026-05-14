@@ -247,7 +247,15 @@ export class AdminService {
             }
           } 
         },
-        ownedRestaurants: true,
+        ownedRestaurants: {
+          include: {
+            orders: {
+              take: 10,
+              orderBy: { createdAt: 'desc' },
+              include: { driver: { include: { user: { select: { name: true } } } } }
+            }
+          }
+        },
         ledgers: { orderBy: { createdAt: 'desc' } },
         orders: { 
           take: 10, 
@@ -260,14 +268,15 @@ export class AdminService {
     if (!user) throw new NotFoundException('User not found');
 
     const u = user as any;
-    // Merge orders if user is a driver
+    // Merge orders from all roles (Customer, Driver, Vendor)
     const driverOrders = u.driverProfile?.deliveries || [];
     const customerOrders = u.orders || [];
+    const vendorOrders = u.ownedRestaurants?.flatMap((r: any) => r.orders || []) || [];
     
     // Sort merged orders by date
-    const allOrders = [...customerOrders, ...driverOrders]
+    const allOrders = [...customerOrders, ...driverOrders, ...vendorOrders]
       .sort((a: any, b: any) => b.createdAt.getTime() - a.createdAt.getTime())
-      .slice(0, 10);
+      .slice(0, 15);
 
     return {
       ...user,

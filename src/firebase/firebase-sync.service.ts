@@ -133,13 +133,24 @@ export class FirebaseSyncService implements OnModuleInit {
           }
         });
       } else {
+        // Check if the firebaseUid is already taken by another user
+        if (uid !== existingUser.firebaseUid) {
+          const uidTaken = await this.prisma.user.findFirst({
+            where: { firebaseUid: uid, id: { not: existingUser.id } }
+          });
+          if (uidTaken) {
+            this.logger.warn(`Firebase UID ${uid} is already assigned to user ${uidTaken.email}. Skipping update for ${data.email}.`);
+            return;
+          }
+        }
+
         // Update existing user with Firebase UID and Role (if Firebase has a higher privilege)
         await this.prisma.user.update({
           where: { id: existingUser.id },
           data: {
             firebaseUid: uid,
             // Only update role if it's admin/superadmin to avoid demoting someone accidentally
-            role: (role === Role.ADMIN || role === Role.SUPERADMIN) ? role : existingUser.role,
+            role: (role === Role.ADMIN || (role as any) === 'SUPERADMIN') ? role : existingUser.role,
             name: existingUser.name || data.displayName || data.name,
             phone: existingUser.phone || data.phone || data.phoneNumber,
           }

@@ -24,18 +24,18 @@ import { MailerService } from './mailer.service';
           transport: {
             host,
             port: Number(port),
-            secure,
+            secure: Number(port) === 465,
             auth: {
               user,
               pass: config.get('MAIL_PASS'),
             },
-            requireTLS: port == 587,
-            connectionTimeout: 20000, // Increased timeout
-            socketTimeout: 20000,
             tls: {
               rejectUnauthorized: false,
-              minVersion: 'TLSv1.2',
             },
+            pool: true, // Use pooling
+            connectionTimeout: 10000,
+            greetingTimeout: 10000,
+            socketTimeout: 10000,
           },
           defaults: {
             from: `"${config.get('MAIL_FROM_NAME') || 'Z-SPEED'}" <${config.get('MAIL_FROM') || user}>`,

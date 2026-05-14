@@ -10,6 +10,7 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  Response,
 } from '@nestjs/common';
 import { AdminService } from './admin.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -68,7 +69,7 @@ export class AdminController {
     @Body('role') role: string,
     @CurrentUser() currentUser: any,
   ) {
-    return this.adminService.updateUserRole(currentUser.id, id, role);
+    return this.adminService.updateUserRole(currentUser.userId, id, role);
   }
 
   @Patch('users/:id/reset-password')
@@ -81,7 +82,7 @@ export class AdminController {
     @Body('name') name: string,
     @CurrentUser() currentUser: any,
   ) {
-    return this.adminService.updateOwnName(currentUser.id, name);
+    return this.adminService.updateOwnName(currentUser.userId, name);
   }
 
   @Delete('users/:id')
@@ -279,5 +280,16 @@ export class AdminController {
   @Get('map-data')
   async getMapData() {
     return this.adminService.getMapData();
+  @Get('reconcile')
+  async reconcileFinancials() {
+    return this.adminService.reconcileFinancials();
+  }
+
+  @Get('export/:type')
+  async exportData(@Param('type') type: 'orders' | 'settlements', @Response() res: any) {
+    const csv = await this.adminService.getExportData(type);
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename=${type}_export_${new Date().toISOString().split('T')[0]}.csv`);
+    return res.send(csv);
   }
 }

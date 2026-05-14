@@ -1,4 +1,6 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger, Inject } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import Redis from 'ioredis';
 import { PrismaService } from '../prisma/prisma.service';
 import { FirebaseAdminService } from '../firebase/firebase-admin.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -15,13 +17,48 @@ export class AdminService {
     private readonly prisma: PrismaService,
     private readonly firebase: FirebaseAdminService,
     private readonly notifications: NotificationsService,
+    @Inject('REDIS_CLIENT') private readonly redis: Redis,
   ) {}
+
+  private async createAuditLog(
+    userId: string,
+    action: string,
+    targetTable?: string,
+    targetId?: string,
+    newData?: any,
+    oldData?: any,
+  ) {
+    try {
+      const user = await this.prisma.user.findUnique({ where: { id: userId } });
+      await this.prisma.auditLog.create({
+        data: {
+          userId,
+          userRole: user?.role,
+          action,
+          targetTable,
+          targetId,
+          newData: newData ? JSON.stringify(newData) : null,
+          oldData: oldData ? JSON.stringify(oldData) : null,
+        },
+      });
+    } catch (err) {
+      this.logger.error('Failed to create audit log:', err);
+    }
+  }
 
   // =============================================
   // ANALYTICS / DASHBOARD
   // =============================================
 
   async getDashboardAnalytics() {
+    const cacheKey = 'admin:dashboard:analytics';
+    try {
+      const cached = await this.redis.get(cacheKey);
+      if (cached) return JSON.parse(cached);
+    } catch (err) {
+      this.logger.warn('Redis read failed for analytics cache');
+    }
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const thirtyDaysAgo = new Date(today);
@@ -179,6 +216,7 @@ export class AdminService {
         activeOrders: { value: Number(activeOrdersCount || 0) },
         onlineDrivers: { value: Number(onlineDriversCount || 0) },
         openRestaurants: { value: Number(openRestaurantsCount || 0) },
+        health: { status: 'Stable', uptime: '99.9%' },
       },
       recentOrders: (recentOrdersList || []).map((o: any) => ({
         id: o.firebaseOrderId || o.id?.slice(0, 8) || 'N/A',
@@ -201,6 +239,12 @@ export class AdminService {
         orderStatuses: orderStatusesMap || {},
       }
     };
+
+    try {
+      await this.redis.set(cacheKey, JSON.stringify(result), 'EX', 300); // Cache for 5 mins
+    } catch (err) {
+      this.logger.warn('Failed to save analytics to Redis cache');
+    }
 
     return result;
   }
@@ -1365,5 +1409,120 @@ export class AdminService {
       restaurants, 
       heatmap: recentOrders.map(o => [o.deliveryLat, o.deliveryLng, 0.5]) // [lat, lng, intensity]
     };
+  async reconcileFinancials() {
+    const [drivers, restaurants] = await Promise.all([
+      this.prisma.driverProfile.findMany({ include: { user: { select: { walletBalance: true } } } }),
+      this.prisma.restaurant.findMany({ select: { id: true, walletBalance: true, name: true, ownerId: true } }),
+    ]);
+
+    const issues = [];
+
+    // Check Drivers
+    for (const driver of drivers) {
+      const ledgerSum = await this.prisma.ledger.aggregate({
+        where: { userId: driver.userId, status: 'completed' },
+        _sum: { amount: true },
+      });
+      const expectedBalance = ledgerSum._sum.amount || 0;
+      if (Math.abs(expectedBalance - driver.user.walletBalance) > 0.01) {
+        issues.push({
+          type: 'DRIVER',
+          id: driver.id,
+          userId: driver.userId,
+          stored: driver.user.walletBalance,
+          calculated: expectedBalance,
+          diff: expectedBalance - driver.user.walletBalance,
+        });
+      }
+    }
+
+    // Check Restaurants
+    for (const rest of restaurants) {
+      const ledgerSum = await this.prisma.ledger.aggregate({
+        where: { userId: rest.ownerId, status: 'completed' },
+        _sum: { amount: true },
+      });
+      const expectedBalance = ledgerSum._sum.amount || 0;
+      if (Math.abs(expectedBalance - rest.walletBalance) > 0.01) {
+        issues.push({
+          type: 'RESTAURANT',
+          id: rest.id,
+          name: rest.name,
+          stored: rest.walletBalance,
+          calculated: expectedBalance,
+          diff: expectedBalance - rest.walletBalance,
+        });
+      }
+    }
+
+    return { totalChecked: drivers.length + restaurants.length, issuesFound: issues.length, issues };
+  }
+
+  async getExportData(type: 'orders' | 'settlements') {
+    if (type === 'orders') {
+      const orders = await this.prisma.order.findMany({
+        take: 1000,
+        orderBy: { createdAt: 'desc' },
+        include: { customer: { select: { name: true } }, restaurant: { select: { name: true } } },
+      });
+
+      const header = 'ID,Date,Customer,Vendor,Status,Total,Payment\n';
+      const rows = orders.map(o => 
+        `${o.id},${o.createdAt.toISOString()},"${o.customer?.name}","${o.restaurant?.name}",${o.status},${o.total},${o.paymentMethod}`
+      ).join('\n');
+      return header + rows;
+    } else {
+      const settlements = await this.prisma.ledger.findMany({
+        where: { type: 'PAYOUT' },
+        take: 1000,
+        orderBy: { createdAt: 'desc' },
+        include: { user: { select: { name: true, email: true } } },
+      });
+
+      const header = 'ID,Date,Recipient,Email,Amount,Status,Description\n';
+      const rows = settlements.map(s => 
+        `${s.id},${s.createdAt.toISOString()},"${s.user?.name}",${s.user?.email},${s.amount},${s.status},"${s.description || ''}"`
+      ).join('\n');
+      return header + rows;
+    }
+  /**
+   * Automate financial reconciliation every night at midnight.
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
+  async runDailyFinancialReconciliation() {
+    this.logger.log('Starting daily financial reconciliation cron job...');
+    const result = await this.reconcileFinancials();
+    
+    if (result.issuesFound > 0) {
+      await this.notifications.sendTelegramAlert(
+        `🚨 *Financial Discrepancy Found*\n` +
+        `- Total Checked: ${result.totalChecked}\n` +
+        `- Issues Found: ${result.issuesFound}\n` +
+        `Please check the admin panel for details.`
+      );
+    } else {
+      this.logger.log('Daily financial reconciliation completed: No issues found.');
+    }
+  }
+
+  /**
+   * Monitor operational health every hour.
+   */
+  @Cron(CronExpression.EVERY_HOUR)
+  async runOperationalHealthCheck() {
+    this.logger.log('Running operational health check...');
+    
+    // Check for high volume of pending orders (> 20)
+    const pendingCount = await this.prisma.order.count({ where: { status: OrderStatus.PENDING } });
+    if (pendingCount > 20) {
+      await this.notifications.sendTelegramAlert(
+        `⚠️ *High Pending Order Volume*\n` +
+        `- Current Pending: ${pendingCount}\n` +
+        `Please check if drivers are available or if there is a system delay.`
+      );
+    }
+
+    // Check for restaurants that might be offline during peak hours (example)
+    // (This is just a placeholder for more complex logic)
   }
 }

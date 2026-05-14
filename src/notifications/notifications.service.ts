@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
+import { ConfigService } from '@nestjs/config';
 import type { Queue } from 'bull';
+import axios from 'axios';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -9,8 +11,32 @@ export class NotificationsService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
     @InjectQueue('notifications') private readonly notificationQueue: Queue,
   ) {}
+
+  /**
+   * Send a critical alert to Telegram.
+   */
+  async sendTelegramAlert(message: string) {
+    const token = this.config.get<string>('TELEGRAM_BOT_TOKEN');
+    const chatId = this.config.get<string>('TELEGRAM_CHAT_ID');
+
+    if (!token || !chatId) {
+      this.logger.warn('Telegram alerts are not configured (missing token/chatId)');
+      return;
+    }
+
+    try {
+      await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
+        chat_id: chatId,
+        text: `🚨 *Z-SPEED ALERT*\n\n${message}`,
+        parse_mode: 'Markdown',
+      });
+    } catch (err) {
+      this.logger.error(`Failed to send Telegram alert: ${err.message}`);
+    }
+  }
 
   /**
    * Create and persist a notification for a user.

@@ -88,7 +88,7 @@ export class AdminService {
       this.prisma.order.aggregate({ _sum: { total: true }, where: { status: OrderStatus.DELIVERED } }),
       this.prisma.order.count({ where: { status: OrderStatus.PENDING } }),
       this.prisma.restaurant.count({ where: { status: AccountStatus.ACTIVE } }),
-      this.prisma.driverProfile.count({ where: { applicationStatus: 'PENDING' } }),
+      this.prisma.driverProfile.count({ where: { applicationStatus: { in: ['PENDING', 'UNDER_REVIEW'] } as any } }),
       
       // REAL-TIME STATS
       this.prisma.order.count({
@@ -448,7 +448,12 @@ export class AdminService {
   async getDriverApplications(status?: string) {
     const where: any = {};
     if (status && status !== 'all') {
-      where.applicationStatus = status.toUpperCase();
+      const s = status.toUpperCase();
+      if (s === 'PENDING') {
+        where.applicationStatus = { in: ['PENDING', 'UNDER_REVIEW'] };
+      } else {
+        where.applicationStatus = s;
+      }
     }
 
     const drivers = await this.prisma.driverProfile.findMany({
@@ -504,6 +509,12 @@ export class AdminService {
       data: { applicationStatus: 'APPROVED' as any },
     });
 
+    // CRITICAL: Update user role to DRIVER
+    await this.prisma.user.update({
+      where: { id: profile.userId },
+      data: { role: Role.DRIVER },
+    });
+
     // Notify driver
     try {
       await this.notifications.createNotification(
@@ -529,6 +540,12 @@ export class AdminService {
     await this.prisma.driverProfile.update({
       where: { id: driverProfileId },
       data: { applicationStatus: 'REJECTED' as any },
+    });
+
+    // Ensure role remains/returns to CUSTOMER
+    await this.prisma.user.update({
+      where: { id: profile.userId },
+      data: { role: Role.CUSTOMER },
     });
 
     // Notify driver
@@ -1017,7 +1034,7 @@ export class AdminService {
   async getPendingApplications() {
     const [drivers, restaurants] = await Promise.all([
       this.prisma.driverProfile.findMany({
-        where: { applicationStatus: 'PENDING' as any },
+        where: { applicationStatus: { in: ['PENDING', 'UNDER_REVIEW'] } as any },
         include: { user: true },
       }),
       this.prisma.restaurant.findMany({

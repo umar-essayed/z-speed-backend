@@ -487,6 +487,9 @@ model Order {
   readyAt          DateTime?
   driverAssignedAt DateTime?
   deliveredAt      DateTime?
+  pickedUpAt       DateTime?
+  outForDeliveryAt DateTime?
+  arrivedAt        DateTime?
 
   items            OrderItem[]
   deliveryRequests DeliveryRequest[]

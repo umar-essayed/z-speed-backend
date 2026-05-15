@@ -11,7 +11,9 @@ export class NotificationProcessor {
   constructor(
     private readonly oneSignalService: OneSignalService,
     private readonly prisma: PrismaService,
-  ) {}
+  ) {
+    this.logger.log('🚀 NotificationProcessor initialized and ready to process jobs');
+  }
 
   @Process('sendPush')
   async handleSendPush(job: Job<{ userId: string; title: string; body: string; data?: any }>) {

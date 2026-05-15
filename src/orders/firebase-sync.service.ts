@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit, Inject, forwardRef } from '@nestjs/co
 import { FirebaseAdminService } from '../firebase/firebase-admin.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../gateway/realtime.gateway';
+import { OrderStateMachineService } from './order-state-machine.service';
 import { OrderStatus, PaymentState, DeliveryRequestStatus } from '@prisma/client';
 import { SignatureUtil } from '../wallet/signature.util';
 
@@ -18,6 +19,7 @@ export class FirebaseSyncService implements OnModuleInit {
     private readonly gateway: RealtimeGateway,
     @Inject(forwardRef(() => OrdersService))
     private readonly ordersService: OrdersService,
+    private readonly stateMachine: OrderStateMachineService,
   ) {}
 
   onModuleInit() {
@@ -753,9 +755,7 @@ export class FirebaseSyncService implements OnModuleInit {
       // 1. Sync Status if changed in Firebase
       if (targetStatus && order.status !== targetStatus) {
         // Validate transition via state machine before applying
-        const { OrderStateMachineService } = await import('./order-state-machine.service');
-        const tempMachine = new OrderStateMachineService();
-        if (!tempMachine.canTransition(order.status, targetStatus, 'DRIVER' as any)) {
+        if (!this.stateMachine.canTransition(order.status, targetStatus, 'DRIVER' as any)) {
           this.logger.warn(`Firebase status sync blocked: invalid transition ${order.status} → ${targetStatus} for order ${postgresOrderId}`);
         } else {
           this.logger.log(`🔄 Syncing status change FROM Firebase: ${firebaseStatus} -> ${targetStatus} for Order ${postgresOrderId}`);
@@ -1019,14 +1019,19 @@ export class FirebaseSyncService implements OnModuleInit {
       }
 
       // 3. Only assign driver if current order status allows it (prevent status downgrade)
-      const allowedForAssignment = [
+      if (!existingOrder) {
+        this.logger.error(`Order ${postgresOrderId} not found for driver assignment.`);
+        return;
+      }
+
+      const allowedForAssignment: OrderStatus[] = [
         OrderStatus.PENDING,
         OrderStatus.CONFIRMED,
         OrderStatus.PREPARING,
         OrderStatus.READY,
         OrderStatus.READY_FOR_PICKUP,
       ];
-      if (!allowedForAssignment.includes(existingOrder.status as OrderStatus)) {
+      if (!allowedForAssignment.includes(existingOrder.status)) {
         this.logger.warn(`Order ${postgresOrderId} is in status ${existingOrder.status} — driver assignment from Firebase ignored.`);
         return;
       }

@@ -17,14 +17,11 @@ import { MailerModule } from '../mailer/mailer.module';
         const url = configService.get<string>('REDIS_URL');
         if (url) {
           return {
-            redis: {
-              port: parseInt(url.split(':').pop()?.split('/')[0] || '6379'), 
-            },
             url: url,
-            redisOptions: {
-              tls: url.startsWith('rediss://') ? {} : undefined,
+            redis: {
+              tls: url.startsWith('rediss://') ? { rejectUnauthorized: false } : undefined,
               maxRetriesPerRequest: null,
-            }
+            },
           };
         }
         return {
@@ -32,6 +29,7 @@ import { MailerModule } from '../mailer/mailer.module';
             host: configService.get<string>('REDIS_HOST', 'localhost'),
             port: configService.get<number>('REDIS_PORT', 6379),
             password: configService.get<string>('REDIS_PASSWORD'),
+            maxRetriesPerRequest: null,
           },
         };
       },

@@ -11,7 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { OrderStateMachineService } from './order-state-machine.service';
 import { RealtimeGateway } from '../gateway/realtime.gateway';
 import { NotificationsService } from '../notifications/notifications.service';
-import { CheckoutDto, UpdateOrderStatusDto } from './dto';
+import { CalculateOrderDto, CheckoutDto, UpdateOrderStatusDto } from './dto';
 
 import { PromotionsService } from '../promotions/promotions.service';
 import { LoyaltyService } from '../loyalty/loyalty.service';
@@ -42,9 +42,26 @@ export class OrdersService {
   ) {}
 
   /**
-   * Checkout: convert cart to order.
+   * Calculate order totals without creating an order.
    */
-  async checkout(customerId: string, dto: CheckoutDto) {
+  async calculate(customerId: string, dto: CalculateOrderDto) {
+    const { subtotal, deliveryFee, serviceFee, discount, total, items, restaurant, address, distance } = 
+      await this._getCalculation(customerId, dto);
+    
+    return {
+      subtotal,
+      deliveryFee,
+      serviceFee,
+      discount,
+      total,
+      distance,
+      itemsCount: items.length,
+      restaurantName: restaurant.name,
+      deliveryAddress: `${address.street}, ${address.city}`,
+    };
+  }
+
+  private async _getCalculation(customerId: string, dto: CalculateOrderDto | CheckoutDto) {
     // 1. Validate cart is not empty
     const cart = await this.prisma.cart.findUnique({
       where: { customerId },
@@ -52,13 +69,6 @@ export class OrdersService {
     });
     if (!cart || cart.items.length === 0) {
       throw new BadRequestException('Cart is empty');
-    }
-
-    // 1.5 Validate stock and prescriptions
-    for (const item of cart.items) {
-      if (item.foodItem.stockQuantity < item.quantity) {
-        throw new BadRequestException(`Not enough stock for item: ${item.foodItem.name}`);
-      }
     }
 
     // 2. Validate restaurant
@@ -115,7 +125,7 @@ export class OrdersService {
 
     // 4.5 Calculate Service Fee based on restaurant settings
     let serviceFee = 0;
-    const r = restaurant as any; // Cast to access new fields before type updates propagate
+    const r = restaurant as any;
     if (r.serviceFeeType === 'fixed') {
       serviceFee = r.serviceFeeValue || 0;
     } else if (r.serviceFeeType === 'percentage') {
@@ -139,6 +149,29 @@ export class OrdersService {
     }
 
     const total = Math.round((subtotal + deliveryFee + serviceFee - discount) * 100) / 100;
+
+    return {
+      subtotal,
+      deliveryFee,
+      serviceFee,
+      discount,
+      total,
+      promoId,
+      items: cart.items,
+      cartId: cart.id,
+      restaurant,
+      address,
+      distance,
+      commissionRate: restaurant.commissionRate || 0.02,
+    };
+  }
+
+  /**
+   * Checkout: convert cart to order.
+   */
+  async checkout(customerId: string, dto: CheckoutDto) {
+    const calc = await this._getCalculation(customerId, dto);
+    const { subtotal, deliveryFee, serviceFee, discount, total, promoId, items, cartId, restaurant, address } = calc;
 
     // 6. Handle payment method
     let paymentState: PaymentState = PaymentState.PENDING;
@@ -181,12 +214,12 @@ export class OrdersService {
         deliveryLng: address.longitude,
         customerNote: dto.customerNote,
         items: {
-          create: cart.items.map((item) => ({
+          create: items.map((item) => ({
             foodItem: { connect: { id: item.foodItemId } },
             quantity: item.quantity,
             unitPrice: item.unitPrice,
             selectedAddons: item.selectedAddons ?? undefined,
-                        specialNote: item.specialNote ?? undefined,
+            specialNote: item.specialNote ?? undefined,
           })),
         },
       },
@@ -208,17 +241,10 @@ export class OrdersService {
       });
     }
 
-    // 9. Update stock and clear cart
-    for (const item of cart.items) {
-      await this.prisma.foodItem.update({
-        where: { id: item.foodItemId },
-        data: { stockQuantity: { decrement: item.quantity } },
-      });
-    }
-
-    await this.prisma.cartItem.deleteMany({ where: { cartId: cart.id } });
+    // 9. Clear cart
+    await this.prisma.cartItem.deleteMany({ where: { cartId: cartId } });
     await this.prisma.cart.update({
-      where: { id: cart.id },
+      where: { id: cartId },
       data: { restaurantId: null },
     });
 

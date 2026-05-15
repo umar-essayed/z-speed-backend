@@ -17,7 +17,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ParseUUIDPipe } from '../common/pipes/parse-uuid.pipe';
-import { CheckoutDto, UpdateOrderStatusDto } from './dto';
+import { CalculateOrderDto, CheckoutDto, UpdateOrderStatusDto } from './dto';
 
 // ============================================================
 // CUSTOMER ROUTES — /orders
@@ -62,6 +62,16 @@ export class OrdersController {
     @Body('subtotal') subtotal: number,
   ) {
     return this.ordersService.validatePromo(code, subtotal, userId);
+  }
+
+  @Post('calculate')
+  @UseGuards(SuperTokensAuthGuard, RolesGuard)
+  @Roles(Role.CUSTOMER)
+  async calculate(
+    @CurrentUser('userId') userId: string,
+    @Body() dto: CalculateOrderDto,
+  ) {
+    return this.ordersService.calculate(userId, dto);
   }
 
   @Get('my')

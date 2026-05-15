@@ -39,6 +39,7 @@ export class NotificationsService {
     });
 
     // Offload push notification to BullMQ (Non-blocking)
+    this.logger.log(`Queueing push notification for user: ${userId}`);
     this.notificationQueue.add('sendPush', {
       userId,
       title,

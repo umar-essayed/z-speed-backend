@@ -39,11 +39,13 @@ export class RealtimeGateway
    */
   async handleConnection(client: Socket) {
     try {
+      this.logger.log(`Socket: Connection attempt from ${client.id}`);
       const token =
         client.handshake.auth?.token ||
         client.handshake.headers?.authorization?.replace('Bearer ', '');
 
       if (!token) {
+        this.logger.warn(`Socket: No token for client ${client.id}`);
         client.disconnect();
         return;
       }
@@ -55,6 +57,8 @@ export class RealtimeGateway
       client.data.userId = payload.sub;
       client.data.role = payload.role;
 
+      this.logger.log(`Socket: User ${payload.sub} (${payload.role}) connected: ${client.id}`);
+      
       // Join user-specific room
       client.join(`user:${payload.sub}`);
 
@@ -68,7 +72,7 @@ export class RealtimeGateway
 
       this.logger.log(`Client connected: ${payload.sub} (${payload.role})`);
     } catch (err) {
-      this.logger.warn(`Connection rejected: invalid token`);
+      this.logger.error(`Socket: Connection rejected for ${client.id}: ${err.message}`);
       client.disconnect();
     }
   }

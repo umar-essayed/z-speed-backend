@@ -20,6 +20,8 @@ export class OneSignalService {
       return;
     }
 
+    this.logger.log(`OneSignal: Attempting to send push to user ${userId} with title: ${title}`);
+
     try {
       const response = await axios.post(
         'https://onesignal.com/api/v1/notifications',
@@ -41,9 +43,8 @@ export class OneSignalService {
       this.logger.log(`OneSignal notification sent to user ${userId}: ${response.data.id}`);
       return response.data;
     } catch (error) {
-      this.logger.error(
-        `Error sending OneSignal notification: ${error.response?.data?.errors?.[0] || error.message}`
-      );
+      const errorDetail = error.response?.data ? JSON.stringify(error.response.data) : error.message;
+      this.logger.error(`Error sending OneSignal notification to ${userId}: ${errorDetail}`);
       throw error;
     }
   }

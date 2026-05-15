@@ -3,6 +3,7 @@ import { InjectQueue } from '@nestjs/bull';
 import { ConfigService } from '@nestjs/config';
 import type { Queue } from 'bull';
 import { PrismaService } from '../prisma/prisma.service';
+import { RealtimeGateway } from '../gateway/realtime.gateway';
 
 @Injectable()
 export class NotificationsService {
@@ -12,6 +13,7 @@ export class NotificationsService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     @InjectQueue('notifications') private readonly notificationQueue: Queue,
+    private readonly realtimeGateway: RealtimeGateway,
   ) {}
 
   /**
@@ -43,6 +45,9 @@ export class NotificationsService {
       body,
       data,
     }).catch(err => this.logger.error(`Failed to queue push notification for ${userId}: ${err.message}`));
+
+    // Real-time notification via Socket.io
+    this.realtimeGateway.emitToCustomer(userId, 'notification:new', notification);
 
     this.logger.log(`Notification created and queued for ${userId}: ${title}`);
     return notification;

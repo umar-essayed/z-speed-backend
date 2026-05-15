@@ -149,6 +149,8 @@ export class OrdersService {
     }
 
     const total = Math.round((subtotal + deliveryFee + serviceFee - discount) * 100) / 100;
+    
+    this.logger.log(`[OrderCalc] Customer: ${customerId}, Subtotal: ${subtotal}, Distance: ${distance}, DeliveryFee: ${deliveryFee}, ServiceFee: ${serviceFee}, Total: ${total}`);
 
     return {
       subtotal,

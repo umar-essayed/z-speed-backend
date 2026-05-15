@@ -31,6 +31,16 @@ export class ReviewsController {
     return this.reviewsService.create(userId, dto);
   }
 
+  @Get('check')
+  @UseGuards(SuperTokensAuthGuard, RolesGuard)
+  @Roles(Role.CUSTOMER)
+  async checkReview(
+    @CurrentUser('userId') userId: string,
+    @Query('orderId') orderId: string,
+  ) {
+    return this.reviewsService.hasReviewed(userId, orderId);
+  }
+
   @Get('restaurant/:id')
   async getByRestaurant(
     @Param('id', ParseUUIDPipe) id: string,

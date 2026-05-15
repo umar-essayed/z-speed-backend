@@ -135,4 +135,14 @@ export class ReviewsService {
       data: { vendorReply: reply },
     });
   }
+
+  /**
+   * Check if user has reviewed an order.
+   */
+  async hasReviewed(customerId: string, orderId: string) {
+    const review = await this.prisma.review.findFirst({
+      where: { orderId, customerId },
+    });
+    return { hasReviewed: !!review };
+  }
 }

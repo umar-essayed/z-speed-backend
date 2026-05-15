@@ -507,10 +507,10 @@ export class OrdersService {
         break;
       case OrderStatus.OUT_FOR_DELIVERY:
       case OrderStatus.IN_TRANSIT:
-        // Already picking up or heading to customer
+        timestamps.outForDeliveryAt = new Date();
         break;
       case OrderStatus.ARRIVED:
-        // Arrived at customer
+        timestamps.arrivedAt = new Date();
         break;
       case OrderStatus.DELIVERED:
         timestamps.deliveredAt = new Date();

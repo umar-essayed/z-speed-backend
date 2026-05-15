@@ -110,7 +110,7 @@ export class OrdersService {
 
     // 4. Calculate totals
     const rawSubtotal = cart.items.reduce(
-      (sum, item) => sum + item.unitPrice * item.quantity,
+      (sum, item) => sum + (item.foodItem?.price ?? item.unitPrice) * item.quantity,
       0,
     );
     const subtotal = Math.round(rawSubtotal * 100) / 100;
@@ -123,20 +123,18 @@ export class OrdersService {
     // Calculate Delivery Fee based on restaurant settings
     const deliveryFee = this.calculateDeliveryFee(restaurant, distance);
 
-    // 4.5 Calculate Service Fee based on restaurant settings
+    // 4.5 Calculate Service Fee — always load system config as fallback
+    const sysConfig = await this.prisma.systemConfig.findUnique({ where: { id: 'default' } });
+    const fallbackFeePercent = sysConfig?.platformFeePercent ?? 2.0;
     let serviceFee = 0;
     const r = restaurant as any;
-    if (r.serviceFeeType === 'fixed') {
-      serviceFee = r.serviceFeeValue || 0;
-    } else if (r.serviceFeeType === 'percentage') {
-      serviceFee = Math.round(subtotal * ((r.serviceFeeValue || 0) / 100) * 100) / 100;
+    if (r.serviceFeeType === 'fixed' && r.serviceFeeValue != null) {
+      serviceFee = r.serviceFeeValue;
+    } else if (r.serviceFeeType === 'percentage' && r.serviceFeeValue != null) {
+      serviceFee = Math.round(subtotal * (r.serviceFeeValue / 100) * 100) / 100;
     } else {
-      // Fallback to system config if not set
-      const config = await this.prisma.systemConfig.findUnique({
-        where: { id: 'default' },
-      });
-      const serviceFeePercent = config?.platformFeePercent ?? 2.0;
-      serviceFee = Math.round(subtotal * (serviceFeePercent / 100) * 100) / 100;
+      // Fallback to system config (covers missing type OR missing value)
+      serviceFee = Math.round(subtotal * (fallbackFeePercent / 100) * 100) / 100;
     }
 
     // 5. Validate & apply promo code
@@ -175,95 +173,98 @@ export class OrdersService {
     const calc = await this._getCalculation(customerId, dto);
     const { subtotal, deliveryFee, serviceFee, discount, total, promoId, items, cartId, restaurant, address } = calc;
 
-    // 6. Handle payment method
+    // Pre-validate before entering transaction
+    if (dto.paymentMethod === 'CYBERSOURCE_CARD' && !dto.transientToken) {
+      throw new BadRequestException('Transient token required for card payments');
+    }
+
+    // Execute all DB writes atomically to prevent partial state on failure
     let paymentState: PaymentState = PaymentState.PENDING;
-
-    if (dto.paymentMethod === 'WALLET') {
-      const user = await this.prisma.user.findUnique({ where: { id: customerId } });
-      if (!user || user.walletBalance < total) {
-        throw new BadRequestException('Insufficient wallet balance');
+    const order = await this.prisma.$transaction(async (tx) => {
+      // 6. Handle payment method inside transaction
+      if (dto.paymentMethod === 'WALLET') {
+        const user = await tx.user.findUnique({ where: { id: customerId } });
+        if (!user || user.walletBalance < total) {
+          throw new BadRequestException('Insufficient wallet balance');
+        }
+        await tx.user.update({
+          where: { id: customerId },
+          data: { walletBalance: { decrement: total } },
+        });
+        paymentState = PaymentState.PAID;
       }
-      // Deduct wallet
-      await this.prisma.user.update({
-        where: { id: customerId },
-        data: { walletBalance: { decrement: total } },
-      });
-      paymentState = PaymentState.PAID;
-    } else if (dto.paymentMethod === 'CASH') {
-      paymentState = PaymentState.PENDING;
-    } else if (dto.paymentMethod === 'CYBERSOURCE_CARD') {
-      if (!dto.transientToken) {
-        throw new BadRequestException('Transient token required for card payments');
-      }
-      paymentState = PaymentState.PENDING;
-    }
 
-    // 7. Create order
-    const order = await this.prisma.order.create({
-      data: {
-        customerId,
-        restaurantId: dto.restaurantId,
-        status: OrderStatus.PENDING,
-        subtotal,
-        deliveryFee,
-        serviceFee,
-        discount,
-        total,
-        paymentMethod: dto.paymentMethod,
-        paymentState,
-        deliveryAddress: `${address.street}, ${address.city}`,
-        deliveryLat: address.latitude,
-        deliveryLng: address.longitude,
-        customerNote: dto.customerNote,
-        items: {
-          create: items.map((item) => ({
-            foodItem: { connect: { id: item.foodItemId } },
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            selectedAddons: item.selectedAddons ?? undefined,
-            specialNote: item.specialNote ?? undefined,
-          })),
-        },
-      },
-      include: { 
-        items: { include: { foodItem: true } },
-        restaurant: { select: { ownerId: true } }
-      },
-    });
-
-    // 8. Record promo usage
-    if (dto.promoCode && promoId) {
-      await this.promotionsService.incrementUsage(dto.promoCode);
-      await this.prisma.promotionUsage.create({
+      // 7. Create order — use live foodItem.price to ensure consistency with subtotal
+      const newOrder = await tx.order.create({
         data: {
-          promotionId: promoId,
-          userId: customerId,
-          orderId: order.id,
+          customerId,
+          restaurantId: dto.restaurantId,
+          status: OrderStatus.PENDING,
+          subtotal,
+          deliveryFee,
+          serviceFee,
+          discount,
+          total,
+          paymentMethod: dto.paymentMethod,
+          paymentState,
+          deliveryAddress: `${address.street}, ${address.city}`,
+          deliveryLat: address.latitude,
+          deliveryLng: address.longitude,
+          customerNote: dto.customerNote,
+          items: {
+            create: items.map((item) => ({
+              foodItem: { connect: { id: item.foodItemId } },
+              quantity: item.quantity,
+              unitPrice: item.foodItem?.price ?? item.unitPrice, // Fixed: use live DB price
+              selectedAddons: item.selectedAddons ?? undefined,
+              specialNote: item.specialNote ?? undefined,
+            })),
+          },
+        },
+        include: {
+          items: { include: { foodItem: true } },
+          restaurant: { select: { ownerId: true } },
         },
       });
-    }
 
-    // 9. Clear cart
-    await this.prisma.cartItem.deleteMany({ where: { cartId: cartId } });
-    await this.prisma.cart.update({
-      where: { id: cartId },
-      data: { restaurantId: null },
+      // 8. Record promo usage inside transaction so it rolls back if order fails
+      if (dto.promoCode && promoId) {
+        await tx.promotionUsage.create({
+          data: {
+            promotionId: promoId,
+            userId: customerId,
+            orderId: newOrder.id,
+          },
+        });
+      }
+
+      // 9. Clear cart
+      await tx.cartItem.deleteMany({ where: { cartId: cartId } });
+      await tx.cart.update({
+        where: { id: cartId },
+        data: { restaurantId: null },
+      });
+
+      return newOrder;
     });
+
+    // Increment promo counter outside transaction (best-effort, non-critical)
+    if (dto.promoCode && promoId) {
+      this.promotionsService.incrementUsage(dto.promoCode).catch(err =>
+        this.logger.warn(`Failed to increment promo usage for ${dto.promoCode}: ${err.message}`)
+      );
+    }
 
     this.logger.log(`Order created: ${order.id} by customer ${customerId} for restaurant ${dto.restaurantId}`);
-    
-    // Notify Vendor (Sequential to ensure DB record exists for Socket refresh)
-    this.logger.log(`Triggering notifyVendor and emitToVendor for restaurant ${dto.restaurantId}`);
+
+    // Notify Vendor
     try {
       await this.notifications.notifyVendor(dto.restaurantId, order.id);
-      this.logger.log(`Notification persisted for order ${order.id}`);
     } catch (err) {
       this.logger.error(`Failed to notify vendor for order ${order.id}:`, err.stack);
     }
-    
     try {
       this.gateway.emitToVendor(dto.restaurantId, 'order:new', order);
-      this.logger.log(`Successfully called emitToVendor for restaurant ${dto.restaurantId}`);
     } catch (err) {
       this.logger.error(`Failed to emit to vendor via gateway:`, err.stack);
     }
@@ -272,7 +273,6 @@ export class OrdersService {
     if (dto.paymentMethod === 'CYBERSOURCE_CARD' && dto.transientToken) {
       const paymentResult = await this.paymentsService.initiateFlexPayment(order.id, dto.transientToken);
       if (!paymentResult.success) {
-        // Log failure but order remains PENDING/FAILED
         this.logger.error(`Payment failed for order ${order.id}: ${paymentResult.status}`);
       }
     }
@@ -285,6 +285,16 @@ export class OrdersService {
    */
   async validatePromo(code: string, subtotal: number, customerId: string) {
     return this.promotionsService.validate(code, subtotal, customerId);
+  }
+
+  /**
+   * Public method so FirebaseSyncService can award loyalty points
+   * without directly coupling to LoyaltyService.
+   */
+  async awardLoyaltyPointsForOrder(customerId: string, points: number) {
+    if (points > 0) {
+      await this.loyaltyService.addPoints(customerId, points);
+    }
   }
 
   /**
@@ -492,17 +502,22 @@ export class OrdersService {
       case OrderStatus.READY:
         timestamps.readyAt = new Date();
         break;
+      case OrderStatus.PICKED_UP:
+        timestamps.pickedUpAt = new Date();
+        break;
+      case OrderStatus.OUT_FOR_DELIVERY:
+      case OrderStatus.IN_TRANSIT:
+        // Already picking up or heading to customer
+        break;
+      case OrderStatus.ARRIVED:
+        // Arrived at customer
+        break;
       case OrderStatus.DELIVERED:
         timestamps.deliveredAt = new Date();
         break;
     }
 
-    // 1. Sync status back to Firebase (Async, don't wait to prevent timeout)
-    this.firebaseSync.updateFirebaseOrderStatus(orderId, dto.status).catch(err => 
-      this.logger.error(`Failed to sync status to Firebase for order ${orderId}:`, err.stack)
-    );
-
-    // 2. Update PostgreSQL Database
+    // 1. Update PostgreSQL Database FIRST — source of truth
     const updated = await this.prisma.order.update({
       where: { id: orderId },
       data: {
@@ -511,6 +526,11 @@ export class OrdersService {
       },
       include: { items: true, restaurant: true },
     });
+
+    // 2. THEN sync to Firebase (Async — don't block response)
+    this.firebaseSync.updateFirebaseOrderStatus(orderId, dto.status).catch(err =>
+      this.logger.error(`Failed to sync status to Firebase for order ${orderId}:`, err.stack)
+    );
 
     // 3. Side effects: Notify Customer (Backgrounded)
     this.notifications.notifyCustomer(updated.customerId, dto.status, orderId).catch(err => 
@@ -810,6 +830,15 @@ export class OrdersService {
   }
 
   private async handleDelivered(order: any) {
+    // Idempotency guard: skip if this order was already settled
+    const existingSettlement = await this.prisma.ledger.findFirst({
+      where: { orderId: order.id, type: 'EARNING' },
+    });
+    if (existingSettlement) {
+      this.logger.warn(`Order ${order.id} already financially settled. Skipping duplicate settlement.`);
+      return;
+    }
+
     const restaurant = await this.prisma.restaurant.findUnique({
       where: { id: order.restaurantId },
     });
@@ -817,9 +846,9 @@ export class OrdersService {
       where: { id: 'default' },
     });
 
-    // 1. Calculate Split Logic (New: Restaurant gets 100% of products)
+    // 1. Unified split: Restaurant = subtotal (100%), App = serviceFee only
     const restaurantShare = order.subtotal;
-    const appCommission = 0; // No commission from products, only service fee
+    const appCommission = 0; // Commission taken via serviceFee, not from restaurant subtotal
     
     const driverShare = order.deliveryFee + (order.driverBoost || 0) + (order.tips || 0);
     const appShare = order.serviceFee;

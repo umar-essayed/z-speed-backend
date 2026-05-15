@@ -10,6 +10,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { OrderStatus, Role } from '@prisma/client';
+import { ForbiddenException } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { SuperTokensAuthGuard } from '../common/guards/auth.guard';
@@ -27,19 +28,19 @@ export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}
 
   @Get()
+  @UseGuards(SuperTokensAuthGuard, RolesGuard)
+  @Roles(Role.CUSTOMER, Role.ADMIN, Role.SUPERADMIN)
   async getOrders(
     @CurrentUser('userId') currentUserId: string,
+    @CurrentUser('role') role: Role,
     @Query('customerId') customerId?: string,
     @Query('status') status?: OrderStatus,
     @Query('page') page?: number,
     @Query('limit') limit?: number,
   ) {
-    // If not logged in, return empty list instead of 401
-    if (!currentUserId && !customerId) {
-      return { data: [], total: 0 };
-    }
-    
-    const targetId = customerId || currentUserId;
+    // Admins can query any customer; customers can only see their own orders
+    const isAdmin = ([Role.ADMIN, Role.SUPERADMIN] as Role[]).includes(role);
+    const targetId = isAdmin && customerId ? customerId : currentUserId;
     return this.ordersService.getMyOrders(targetId, { status, page, limit });
   }
 
@@ -170,11 +171,18 @@ export class VendorOrdersController {
   @Post(':id/dispatch')
   @Roles(Role.VENDOR, Role.ADMIN)
   async manualDispatch(
+    @CurrentUser('userId') userId: string,
+    @CurrentUser('role') role: Role,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    const order = await this.prisma.order.findUnique({ where: { id } });
-    if (!order) throw new NotFoundException('Order not found in Postgres');
-    
+    const order = await this.prisma.order.findUnique({
+      where: { id },
+      include: { restaurant: true },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+    if (role === Role.VENDOR && order.restaurant.ownerId !== userId) {
+      throw new ForbiddenException('Not your restaurant order');
+    }
     await this.ordersService.assignDriversToOrder(id);
     return { success: true, message: 'Dispatch process initiated' };
   }
@@ -182,17 +190,37 @@ export class VendorOrdersController {
   @Get(':id/eligible-drivers')
   @Roles(Role.VENDOR, Role.ADMIN)
   async getEligibleDrivers(
+    @CurrentUser('userId') userId: string,
+    @CurrentUser('role') role: Role,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
+    const order = await this.prisma.order.findUnique({
+      where: { id },
+      include: { restaurant: true },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+    if (role === Role.VENDOR && order.restaurant.ownerId !== userId) {
+      throw new ForbiddenException('Not your restaurant order');
+    }
     return this.ordersService.getEligibleDrivers(id);
   }
 
   @Post(':id/request-driver')
   @Roles(Role.VENDOR, Role.ADMIN)
   async requestSpecificDriver(
+    @CurrentUser('userId') userId: string,
+    @CurrentUser('role') role: Role,
     @Param('id', ParseUUIDPipe) id: string,
     @Body('driverId', ParseUUIDPipe) driverId: string,
   ) {
+    const order = await this.prisma.order.findUnique({
+      where: { id },
+      include: { restaurant: true },
+    });
+    if (!order) throw new NotFoundException('Order not found');
+    if (role === Role.VENDOR && order.restaurant.ownerId !== userId) {
+      throw new ForbiddenException('Not your restaurant order');
+    }
     return this.ordersService.requestDriver(id, driverId);
   }
 }

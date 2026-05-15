@@ -45,7 +45,7 @@ export class OrdersService {
    * Calculate order totals without creating an order.
    */
   async calculate(customerId: string, dto: CalculateOrderDto) {
-    const { subtotal, deliveryFee, serviceFee, discount, total, items, restaurant, address, distance } = 
+    const { subtotal, deliveryFee, serviceFee, discount, total, items, restaurant, address, distance, commissionRate } = 
       await this._getCalculation(customerId, dto);
     
     return {
@@ -55,6 +55,7 @@ export class OrdersService {
       discount,
       total,
       distance,
+      commissionRate,
       itemsCount: items.length,
       restaurantName: restaurant.name,
       deliveryAddress: `${address.street}, ${address.city}`,
@@ -83,29 +84,36 @@ export class OrdersService {
     }
 
     // 3. Validate delivery address
-    const address = await this.prisma.address.findFirst({
-      where: { id: dto.deliveryAddressId, userId: customerId },
-    });
+    let address: any = null;
+    if (dto.deliveryAddressId) {
+      try {
+        address = await this.prisma.address.findUnique({ 
+          where: { id: dto.deliveryAddressId } 
+        });
+      } catch (e) {
+        console.error(`Error fetching address ${dto.deliveryAddressId}:`, e);
+      }
+    }
+    
     if (!address) {
       throw new NotFoundException('Delivery address not found');
     }
 
     // 3.5 Validate geofence & Calculate distance
     let distance = 0;
-    if (restaurant.latitude && restaurant.longitude) {
+    if (restaurant.latitude && restaurant.longitude && address && address.latitude && address.longitude) {
       distance = this.getDistance(
         address.latitude,
         address.longitude,
         restaurant.latitude,
         restaurant.longitude,
       );
-      
-      const enforceGeofence = this.configService.get<string>('ENFORCE_DELIVERY_GEOFENCE') !== 'false';
-      const radius = restaurant.deliveryRadiusKm || 10.0;
-      
-      if (enforceGeofence && distance > radius) {
+      const radius = restaurant.deliveryRadiusKm || 15.0;
+      if (distance > radius) {
         throw new BadRequestException('Delivery address is outside the restaurant delivery zone');
       }
+    } else {
+      console.warn(`[DistanceCalc] Missing coordinates! Res: ${restaurant.latitude},${restaurant.longitude} | Addr: ${address?.latitude},${address?.longitude}`);
     }
 
     // 4. Calculate totals
@@ -123,17 +131,20 @@ export class OrdersService {
     // Calculate Delivery Fee based on restaurant settings
     const deliveryFee = this.calculateDeliveryFee(restaurant, distance);
 
-    // 4.5 Calculate Service Fee — always load system config as fallback
+    // 4.5 Calculate Service Fee (Commission)
     const sysConfig = await this.prisma.systemConfig.findUnique({ where: { id: 'default' } });
     const fallbackFeePercent = sysConfig?.platformFeePercent ?? 2.0;
     let serviceFee = 0;
     const r = restaurant as any;
-    if (r.serviceFeeType === 'fixed' && r.serviceFeeValue != null) {
-      serviceFee = r.serviceFeeValue;
-    } else if (r.serviceFeeType === 'percentage' && r.serviceFeeValue != null) {
+
+    // Use restaurant specific override ONLY if it's explicitly set and greater than 0
+    // Otherwise fallback to system default
+    if (r.serviceFeeType === 'percentage' && r.serviceFeeValue != null && r.serviceFeeValue > 0) {
       serviceFee = Math.round(subtotal * (r.serviceFeeValue / 100) * 100) / 100;
+    } else if (r.serviceFeeType === 'fixed' && r.serviceFeeValue != null && r.serviceFeeValue > 0) {
+      serviceFee = r.serviceFeeValue;
     } else {
-      // Fallback to system config (covers missing type OR missing value)
+      // System fallback (e.g. 2%)
       serviceFee = Math.round(subtotal * (fallbackFeePercent / 100) * 100) / 100;
     }
 
@@ -148,7 +159,7 @@ export class OrdersService {
 
     const total = Math.round((subtotal + deliveryFee + serviceFee - discount) * 100) / 100;
     
-    this.logger.log(`[OrderCalc] Customer: ${customerId}, Subtotal: ${subtotal}, Distance: ${distance}, DeliveryFee: ${deliveryFee}, ServiceFee: ${serviceFee}, Total: ${total}`);
+    this.logger.log(`[OrderCalc] Customer: ${customerId}, Subtotal: ${subtotal}, Distance: ${distance.toFixed(2)}km, Delivery: ${deliveryFee}, Service: ${serviceFee}, Total: ${total}`);
 
     return {
       subtotal,
@@ -162,7 +173,7 @@ export class OrdersService {
       restaurant,
       address,
       distance,
-      commissionRate: restaurant.commissionRate || 0.02,
+      commissionRate: r.serviceFeeType === 'percentage' && r.serviceFeeValue ? r.serviceFeeValue / 100 : fallbackFeePercent / 100,
     };
   }
 
@@ -1083,32 +1094,43 @@ export class OrdersService {
 
   private calculateDeliveryFee(restaurant: any, distance: number): number {
     const mode = restaurant.deliveryFeeMode; // 'fixed' or 'distance'
-    const formula = restaurant.deliveryFeeFormula as any; // sub_mode: 'per_km' or 'tiered'
+    const formula = restaurant.deliveryFeeFormula as any;
 
-    // Default system fee if no restaurant config
+    // Default system fee if no restaurant config (4 EGP per KM, min 15 EGP)
     const defaultFee = Math.max(15, Math.round(distance * 4 * 100) / 100);
 
     if (mode === 'fixed') {
+      // If fixed, use deliveryFee field (fallback to 15 if missing/zero)
       return restaurant.deliveryFee || 15;
     }
 
     if (mode === 'distance') {
-      if (formula?.sub_mode === 'per_km') {
-        const base = formula.base_fee || 0;
-        const rate = formula.per_km_rate || 0;
+      // Check for sub_mode in formula object or the restaurant's sub-mode field
+      const subMode = formula?.sub_mode || restaurant.deliveryFeeSubMode;
+      
+      // 'formula' or 'per_km'
+      if (subMode === 'formula' || subMode === 'per_km') {
+        const base = formula?.base_fee ?? 0;
+        const rate = formula?.per_km_rate ?? 0;
+        // If both are 0, it means config is missing, return default
+        if (base === 0 && rate === 0) return defaultFee;
         return Math.round((base + distance * rate) * 100) / 100;
       }
 
-      if (formula?.sub_mode === 'tiered' && Array.isArray(formula.tiers)) {
-        const matchingTier = formula.tiers.find(
-          (t: any) => distance >= t.from && distance < t.to,
-        );
-        if (matchingTier) {
-          return matchingTier.price;
+      // 'tiers' or 'bracket'
+      if (subMode === 'tiers' || subMode === 'bracket' || subMode === 'tiered') {
+        const tiers = formula?.tiers || restaurant.deliveryFeeTiers;
+        if (Array.isArray(tiers) && tiers.length > 0) {
+          const matchingTier = tiers.find(
+            (t: any) => distance >= t.from && distance < t.to,
+          );
+          if (matchingTier) {
+            return matchingTier.price;
+          }
+          // If outside tiers but inside radius, use last tier or default
+          const lastTier = tiers[tiers.length - 1];
+          if (lastTier && distance >= lastTier.from) return lastTier.price;
         }
-        // If outside tiers but inside radius, use last tier or default
-        const lastTier = formula.tiers[formula.tiers.length - 1];
-        if (lastTier && distance >= lastTier.from) return lastTier.price;
       }
     }
 

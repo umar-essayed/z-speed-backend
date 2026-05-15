@@ -16,6 +16,7 @@ export class NotificationProcessor {
   @Process('sendPush')
   async handleSendPush(job: Job<{ userId: string; title: string; body: string; data?: any }>) {
     const { userId, title, body, data } = job.data;
+    this.logger.log(`Processing push notification for user: ${userId}`);
     
     try {
       // OneSignal uses the Database User ID (External ID) directly

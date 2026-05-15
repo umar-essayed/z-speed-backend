@@ -35,7 +35,7 @@ export class OneSignalService {
         {
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Key ${this.apiKey}`,
+            Authorization: `Basic ${this.apiKey}`,
           },
         }
       );
@@ -63,7 +63,7 @@ export class OneSignalService {
         {
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Key ${this.apiKey}`,
+            Authorization: `Basic ${this.apiKey}`,
           },
         }
       );

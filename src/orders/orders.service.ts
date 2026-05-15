@@ -1093,47 +1093,60 @@ export class OrdersService {
   }
 
   private calculateDeliveryFee(restaurant: any, distance: number): number {
-    const mode = restaurant.deliveryFeeMode; // 'fixed' or 'distance'
+    const rawMode = restaurant.deliveryFeeMode || 'fixed';
+    const mode = rawMode.toLowerCase().trim();
     const formula = restaurant.deliveryFeeFormula as any;
 
-    // Default system fee if no restaurant config (4 EGP per KM, min 15 EGP)
+    // Default system fee fallback (4 EGP per KM, min 15 EGP)
     const defaultFee = Math.max(15, Math.round(distance * 4 * 100) / 100);
 
-    if (mode === 'fixed') {
-      // If fixed, use deliveryFee field (fallback to 15 if missing/zero)
-      return restaurant.deliveryFee || 15;
-    }
+    let fee = defaultFee;
 
-    if (mode === 'distance') {
+    if (mode === 'fixed' || mode === 'fixed_fee' || mode === 'flat') {
+      // If fixed, use deliveryFee field (fallback to 15 only if it is actually 0 or missing)
+      fee = (restaurant.deliveryFee != null && restaurant.deliveryFee > 0) ? restaurant.deliveryFee : 15;
+    } 
+    else if (mode === 'distance' || mode === 'distance-based' || mode === 'distance_based' || mode === 'dynamic') {
       // Check for sub_mode in formula object or the restaurant's sub-mode field
-      const subMode = formula?.sub_mode || restaurant.deliveryFeeSubMode;
+      const rawSubMode = formula?.sub_mode || restaurant.deliveryFeeSubMode || 'per_km';
+      const subMode = rawSubMode.toLowerCase().trim();
       
       // 'formula' or 'per_km'
       if (subMode === 'formula' || subMode === 'per_km') {
         const base = formula?.base_fee ?? 0;
         const rate = formula?.per_km_rate ?? 0;
         // If both are 0, it means config is missing, return default
-        if (base === 0 && rate === 0) return defaultFee;
-        return Math.round((base + distance * rate) * 100) / 100;
+        if (base === 0 && rate === 0) {
+          fee = defaultFee;
+        } else {
+          fee = Math.round((base + distance * rate) * 100) / 100;
+        }
       }
-
       // 'tiers' or 'bracket'
-      if (subMode === 'tiers' || subMode === 'bracket' || subMode === 'tiered') {
+      else if (subMode === 'tiers' || subMode === 'bracket' || subMode === 'tiered' || subMode === 'tiered_distance') {
         const tiers = formula?.tiers || restaurant.deliveryFeeTiers;
         if (Array.isArray(tiers) && tiers.length > 0) {
           const matchingTier = tiers.find(
             (t: any) => distance >= t.from && distance < t.to,
           );
           if (matchingTier) {
-            return matchingTier.price;
+            fee = matchingTier.price;
+          } else {
+            // If outside tiers but inside radius, use last tier or default
+            const lastTier = tiers[tiers.length - 1];
+            if (lastTier && distance >= lastTier.from) {
+              fee = lastTier.price;
+            } else {
+              fee = defaultFee;
+            }
           }
-          // If outside tiers but inside radius, use last tier or default
-          const lastTier = tiers[tiers.length - 1];
-          if (lastTier && distance >= lastTier.from) return lastTier.price;
+        } else {
+          fee = defaultFee;
         }
       }
     }
 
-    return defaultFee;
+    this.logger.debug(`[DeliveryFee] Mode: ${mode}, SubMode: ${restaurant.deliveryFeeSubMode}, Dist: ${distance.toFixed(2)}km, Result: ${fee}`);
+    return fee;
   }
 }

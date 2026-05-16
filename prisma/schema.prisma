@@ -67,6 +67,22 @@ enum DeliveryRequestStatus {
   EXPIRED
 }
 
+enum RideStatus {
+  PENDING
+  ACCEPTED
+  ARRIVING
+  STARTED
+  COMPLETED
+  CANCELLED
+}
+
+enum RideType {
+  SEDAN
+  SUV
+  BIKE
+  TRUCK
+}
+
 enum LedgerType {
   EARNING
   PAYOUT
@@ -142,6 +158,7 @@ model User {
   auditLogs          AuditLog[]
   disputes           OrderDispute[]    @relation("CustomerDisputes")
   promoUsages        PromotionUsage[]
+  rides              Ride[]            @relation("CustomerRides")
 
   @@map("users")
 }
@@ -198,6 +215,10 @@ model DriverProfile {
   lastPingAt  DateTime?
   isAvailable Boolean   @default(false)
 
+  // Capabilities
+  canDeliver   Boolean @default(true)
+  canTransport Boolean @default(false)
+
   // Payout
   payoutMethod      String?
   payoutPhoneNumber String?
@@ -213,6 +234,7 @@ model DriverProfile {
   vehicle          Vehicle?
   deliveryRequests DeliveryRequest[]
   deliveries       Order[]           @relation("DriverOrders")
+  rides            Ride[]            @relation("DriverRides")
 
   @@map("driver_profiles")
 }
@@ -499,6 +521,48 @@ model Order {
   promoUsage       PromotionUsage?
 
   @@map("orders")
+}
+
+model Ride {
+  id String @id @default(uuid())
+
+  customerId String
+  customer   User   @relation("CustomerRides", fields: [customerId], references: [id])
+
+  driverId String?
+  driver   DriverProfile? @relation("DriverRides", fields: [driverId], references: [id])
+
+  status     RideStatus @default(PENDING)
+  type       RideType   @default(SEDAN)
+  firebaseId String?    @unique
+
+  // Locations
+  pickupAddress  String
+  pickupLat      Float
+  pickupLng      Float
+  dropoffAddress String
+  dropoffLat     Float
+  dropoffLng     Float
+
+  // Pricing
+  estimatedDistance Float
+  estimatedFare     Float
+  totalFare         Float
+  paymentMethod     String @default("CASH") // CASH, WALLET, CARD
+  paymentStatus     PaymentState @default(PENDING)
+
+  // Timestamps
+  requestedAt DateTime  @default(now())
+  acceptedAt  DateTime?
+  startedAt   DateTime?
+  completedAt DateTime?
+  cancelledAt DateTime?
+
+  cancellationReason String?
+  rating             Int?
+  ratingComment      String?
+
+  @@map("rides")
 }
 
 model OrderDispute {

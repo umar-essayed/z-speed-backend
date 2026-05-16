@@ -1,105 +1,142 @@
-import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { JWT } from 'google-auth-library';
-import axios from 'axios';
+import { Injectable, Logger } from '@nestjs/common';
+import { FirebaseAdminService } from '../firebase/firebase-admin.service';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
-export class FcmService implements OnModuleInit {
+export class FcmService {
   private readonly logger = new Logger(FcmService.name);
-  private jwtClient: JWT;
-  private projectId: string;
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly firebaseAdmin: FirebaseAdminService,
+    private readonly prisma: PrismaService,
+  ) {}
 
-  onModuleInit() {
-    this.projectId = this.configService.get<string>('FIREBASE_PROJECT_ID') || '';
-    const privateKey = this.configService.get<string>('FIREBASE_PRIVATE_KEY')?.replace(/\\n/g, '\n');
-    const clientEmail = this.configService.get<string>('FIREBASE_CLIENT_EMAIL');
+  async sendToUser(userId: string, title: string, body: string, data: any = {}) {
+    this.logger.log(`FCM: Attempting to send push to user ${userId} with title: ${title}`);
 
-    if (this.projectId && privateKey && clientEmail) {
-      this.jwtClient = new JWT({
-        email: clientEmail,
-        key: privateKey,
-        scopes: ['https://www.googleapis.com/auth/cloud-platform'],
-      });
-      this.logger.log('FCM Service (REST v1) initialized successfully');
-    } else {
-      this.logger.warn('Firebase credentials not found. Push notifications will be disabled.');
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { fcmTokens: true },
+    });
+
+    if (!user || !user.fcmTokens) {
+      this.logger.warn(`No FCM tokens found for user ${userId}. Skipping push.`);
+      return;
     }
-  }
 
-  private async getAccessToken(): Promise<string | null> {
-    if (!this.jwtClient) return null;
-    const tokens = await this.jwtClient.authorize();
-    return tokens.access_token || null;
-  }
+    // Handle tokens (they could be a string, array, or object in our JSON field)
+    let tokens: string[] = [];
+    if (typeof user.fcmTokens === 'string') {
+      tokens = [user.fcmTokens];
+    } else if (Array.isArray(user.fcmTokens)) {
+      tokens = user.fcmTokens;
+    } else if (typeof user.fcmTokens === 'object' && user.fcmTokens !== null) {
+      // If it's an object mapping deviceId -> token
+      tokens = Object.values(user.fcmTokens as Record<string, string>);
+    }
 
-  async sendToTokens(tokens: string[], title: string, body: string, data: any = {}) {
-    if (!this.jwtClient || tokens.length === 0) return;
+    if (tokens.length === 0) {
+      this.logger.warn(`User ${userId} has empty fcmTokens field. Skipping push.`);
+      return;
+    }
 
-    // FCM REST v1 send handles one token at a time or use multiple requests
-    // For simplicity and robustness, we'll send them in parallel
-    const results = await Promise.all(
-      tokens.map((token) => this.sendPush(token, title, body, data)),
-    );
+    // Remove duplicates and empty strings
+    const uniqueTokens = [...new Set(tokens)].filter(t => !!t);
 
-    const successCount = results.filter((r) => r === true).length;
-    const failureCount = results.length - successCount;
+    const message = {
+      notification: {
+        title,
+        body,
+      },
+      data: this.sanitizeData(data),
+      tokens: uniqueTokens,
+    };
 
-    this.logger.log(`FCM Sent: ${successCount} success, ${failureCount} failure`);
-    return { successCount, failureCount };
+    try {
+      const response = await this.firebaseAdmin.getMessaging().sendEachForMulticast(message);
+      
+      this.logger.log(`FCM success: ${response.successCount} sent, ${response.failureCount} failed for user ${userId}`);
+      
+      // Cleanup invalid tokens if any failed
+      if (response.failureCount > 0) {
+        await this.cleanupInvalidTokens(userId, uniqueTokens, response.responses);
+      }
+
+      return response;
+    } catch (error) {
+      this.logger.error(`Error sending FCM to ${userId}: ${error.message}`);
+      throw error;
+    }
   }
 
   async sendToTopic(topic: string, title: string, body: string, data: any = {}) {
-    if (!this.jwtClient) return;
-    return this.sendPush(`/topics/${topic}`, title, body, data);
+    const message = {
+      notification: { title, body },
+      data: this.sanitizeData(data),
+      topic: topic,
+    };
+
+    try {
+      const response = await this.firebaseAdmin.getMessaging().send(message);
+      this.logger.log(`FCM topic message sent to ${topic}: ${response}`);
+      return response;
+    } catch (error) {
+      this.logger.error(`Error sending FCM topic message: ${error.message}`);
+    }
   }
 
-  private async sendPush(target: string, title: string, body: string, data: any = {}): Promise<boolean> {
-    try {
-      const accessToken = await this.getAccessToken();
-      if (!accessToken) return false;
+  /**
+   * Convert all data values to strings (FCM requirement)
+   */
+  private sanitizeData(data: any): Record<string, string> {
+    const sanitized: Record<string, string> = {};
+    for (const key in data) {
+      if (data[key] !== undefined && data[key] !== null) {
+        sanitized[key] = String(data[key]);
+      }
+    }
+    return sanitized;
+  }
 
-      // Convert all data values to strings as required by FCM
-      const stringData: Record<string, string> = {};
-      for (const key in data) {
-        if (data[key] !== undefined && data[key] !== null) {
-          stringData[key] = data[key].toString();
+  private async cleanupInvalidTokens(userId: string, tokens: string[], responses: any[]) {
+    const invalidTokens: string[] = [];
+    responses.forEach((res, index) => {
+      if (!res.success) {
+        const error = res.error;
+        if (
+          error.code === 'messaging/registration-token-not-registered' ||
+          error.code === 'messaging/invalid-registration-token'
+        ) {
+          invalidTokens.push(tokens[index]);
         }
       }
+    });
 
-      const url = `https://fcm.googleapis.com/v1/projects/${this.projectId}/messages:send`;
+    if (invalidTokens.length > 0) {
+      this.logger.log(`Cleaning up ${invalidTokens.length} invalid tokens for user ${userId}`);
       
-      const message: any = {
-        notification: { title, body },
-        data: stringData,
-      };
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { fcmTokens: true },
+      });
 
-      // If target starts with /topics/, it's a topic, otherwise it's a token
-      if (target.startsWith('/topics/')) {
-        message.topic = target.replace('/topics/', '');
-      } else {
-        message.token = target;
+      if (user && user.fcmTokens) {
+        let currentTokens: string[] = [];
+        if (Array.isArray(user.fcmTokens)) {
+          currentTokens = user.fcmTokens;
+        } else if (typeof user.fcmTokens === 'object') {
+          // If it's an object, we need to find keys to delete. 
+          // For simplicity, we assume an array-like structure here for cleanup logic.
+          // In production, you might want to handle device-specific keys.
+        }
+
+        const filteredTokens = currentTokens.filter(t => !invalidTokens.includes(t));
+        
+        await this.prisma.user.update({
+          where: { id: userId },
+          data: { fcmTokens: filteredTokens },
+        });
       }
-
-      await axios.post(
-        url,
-        { message },
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-        },
-      );
-
-      return true;
-    } catch (error) {
-      this.logger.error(
-        `Error sending FCM to ${target}: ${error.response?.data?.error?.message || error.message}`,
-      );
-      return false;
     }
   }
 }
-

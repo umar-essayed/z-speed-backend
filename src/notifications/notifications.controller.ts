@@ -76,6 +76,14 @@ export class NotificationsController {
   ) {
     return this.notificationsService.notifyVendor(restaurantId, 'test-order-id');
   }
+
+  @Post('token')
+  async updateFcmToken(
+    @CurrentUser('userId') userId: string,
+    @Body('token') token: string,
+  ) {
+    return this.notificationsService.updateFcmToken(userId, token);
+  }
 }
 
 @Controller('admin/notifications')

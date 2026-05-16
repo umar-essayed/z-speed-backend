@@ -1,7 +1,7 @@
 import { Process, Processor } from '@nestjs/bull';
 import { Logger } from '@nestjs/common';
 import type { Job } from 'bull';
-import { OneSignalService } from '../../notifications/onesignal.service';
+import { FcmService } from '../../notifications/fcm.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
 @Processor('notifications')
@@ -9,23 +9,22 @@ export class NotificationProcessor {
   private readonly logger = new Logger(NotificationProcessor.name);
 
   constructor(
-    private readonly oneSignalService: OneSignalService,
+    private readonly fcmService: FcmService,
     private readonly prisma: PrismaService,
   ) {
-    this.logger.log('🚀 NotificationProcessor initialized and ready to process jobs');
+    this.logger.log('🚀 NotificationProcessor (FCM) initialized and ready to process jobs');
   }
 
   @Process('sendPush')
   async handleSendPush(job: Job<{ userId: string; title: string; body: string; data?: any }>) {
     const { userId, title, body, data } = job.data;
-    this.logger.log(`Processing push notification for user: ${userId}`);
+    this.logger.log(`Processing FCM push notification for user: ${userId}`);
     
     try {
-      // OneSignal uses the Database User ID (External ID) directly
-      await this.oneSignalService.sendToUser(userId, title, body, data);
-      this.logger.log(`OneSignal notification sent to user ${userId}`);
+      await this.fcmService.sendToUser(userId, title, body, data);
+      this.logger.log(`FCM notification sent to user ${userId}`);
     } catch (error) {
-      this.logger.error(`Failed to send OneSignal push to user ${userId}`, error.stack);
+      this.logger.error(`Failed to send FCM push to user ${userId}`, error.stack);
       throw error;
     }
   }
@@ -34,11 +33,10 @@ export class NotificationProcessor {
   async handleSendTopicPush(job: Job<{ topic: string; title: string; body: string; data?: any }>) {
     const { topic, title, body, data } = job.data;
     try {
-      // For topics, we can use segments in OneSignal or just broadcast
-      await this.oneSignalService.sendToAll(title, body, data);
-      this.logger.log(`OneSignal broadcast notification sent`);
+      await this.fcmService.sendToTopic(topic, title, body, data);
+      this.logger.log(`FCM topic notification sent to ${topic}`);
     } catch (error) {
-      this.logger.error(`Failed to send OneSignal broadcast`, error.stack);
+      this.logger.error(`Failed to send FCM topic push`, error.stack);
       throw error;
     }
   }

@@ -35,6 +35,7 @@ import { OnboardingModule } from './onboarding/onboarding.module';
 import { SupabaseModule } from './common/supabase/supabase.module';
 import { FirebaseModule } from './firebase/firebase.module';
 import { ApplicationsModule } from './applications/applications.module';
+import { TransportModule } from './transport/transport.module';
 
 @Module({
   imports: [
@@ -87,6 +88,7 @@ import { ApplicationsModule } from './applications/applications.module';
     FavoritesModule,
     OnboardingModule,
     ApplicationsModule,
+    TransportModule,
   ],
   providers: [
     {

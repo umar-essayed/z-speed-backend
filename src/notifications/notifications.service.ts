@@ -136,6 +136,38 @@ export class NotificationsService {
     return { count };
   }
 
+  /**
+   * Register/Update FCM Token for a user.
+   */
+  async updateFcmToken(userId: string, token: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { fcmTokens: true },
+    });
+
+    let tokens: string[] = [];
+    if (Array.isArray(user?.fcmTokens)) {
+      tokens = user.fcmTokens as string[];
+    }
+
+    if (!tokens.includes(token)) {
+      tokens.push(token);
+    }
+
+    // Limit to last 5 tokens to prevent bloated Json field
+    if (tokens.length > 5) {
+      tokens = tokens.slice(-5);
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { fcmTokens: tokens },
+    });
+
+    this.logger.log(`Updated FCM token for user ${userId}`);
+    return { success: true };
+  }
+
   // =============================================
   // HELPER METHODS (used internally by other services)
   // =============================================

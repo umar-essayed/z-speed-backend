@@ -328,6 +328,7 @@ export class OrdersService {
         include: {
           items: { include: { foodItem: true } },
           restaurant: { select: { id: true, name: true, logoUrl: true } },
+          driver: { include: { user: { select: { name: true, profileImage: true } } } },
         },
       }),
       this.prisma.order.count({ where }),

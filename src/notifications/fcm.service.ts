@@ -29,7 +29,7 @@ export class FcmService {
     if (typeof user.fcmTokens === 'string') {
       tokens = [user.fcmTokens];
     } else if (Array.isArray(user.fcmTokens)) {
-      tokens = user.fcmTokens;
+      tokens = user.fcmTokens as any as string[];
     } else if (typeof user.fcmTokens === 'object' && user.fcmTokens !== null) {
       // If it's an object mapping deviceId -> token
       tokens = Object.values(user.fcmTokens as Record<string, string>);
@@ -123,7 +123,7 @@ export class FcmService {
       if (user && user.fcmTokens) {
         let currentTokens: string[] = [];
         if (Array.isArray(user.fcmTokens)) {
-          currentTokens = user.fcmTokens;
+          currentTokens = user.fcmTokens as any as string[];
         } else if (typeof user.fcmTokens === 'object') {
           // If it's an object, we need to find keys to delete. 
           // For simplicity, we assume an array-like structure here for cleanup logic.

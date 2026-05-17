@@ -135,12 +135,58 @@ export class DriversService {
       delete data.walletBalance;
     }
 
-    if (Object.keys(data).length === 0) return { message: 'User wallet updated' };
+    let result: any = { message: 'User wallet updated' };
+    if (Object.keys(data).length > 0) {
+      result = await this.prisma.driverProfile.update({
+        where: { userId },
+        data,
+      });
+    }
 
-    return this.prisma.driverProfile.update({
-      where: { userId },
-      data,
-    });
+    // Trigger sync
+    await this.syncDriverStatsToFirebase(userId).catch(() => {});
+
+    return result;
+  }
+
+  /**
+   * Synchronize driver wallet and stats back to Firestore.
+   */
+  async syncDriverStatsToFirebase(userId: string) {
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        include: { driverProfile: true },
+      });
+
+      if (!user || !user.firebaseUid || user.role !== Role.DRIVER) return;
+
+      const firestore = this.firebaseAdmin.getFirestore();
+      if (!firestore) return;
+
+      const profile = user.driverProfile;
+      const walletBalance = Number(user.walletBalance || 0);
+
+      // 1. Update users collection
+      await firestore.collection('users').doc(user.firebaseUid).update({
+        walletBalance,
+      }).catch(() => {});
+
+      // 2. Update driverProfiles collection
+      if (profile) {
+        await firestore.collection('driverProfiles').doc(user.firebaseUid).set({
+          walletBalance,
+          totalEarnings: Number(profile.totalEarnings || 0),
+          totalTrips: Number(profile.totalTrips || 0),
+          acceptanceRate: Number(profile.acceptanceRate || 100),
+          rating: Number(profile.rating || 5.0),
+        }, { merge: true }).catch(() => {});
+      }
+
+      this.logger.log(`Synced wallet and stats to Firestore for driver: ${userId}`);
+    } catch (err) {
+      this.logger.error(`Failed to sync driver stats to Firestore for ${userId}:`, err.message);
+    }
   }
 
   /**

@@ -120,7 +120,29 @@ export class FirebaseSyncService implements OnModuleInit {
       this.logger.error('Error listening to Firebase user addresses:', error);
     });
 
-    // 8. Initial syncs are handled automatically by onSnapshot when it first attaches
+    // 8. Listen for Users collection changes to synchronize fcmTokens to Postgres
+    firestore.collection('users').onSnapshot(async (snapshot) => {
+      for (const change of snapshot.docChanges()) {
+        const uid = change.doc.id;
+        const data = change.doc.data();
+        if (data.fcmTokens && Array.isArray(data.fcmTokens)) {
+          // Find user in PostgreSQL and update fcmTokens
+          const user = await this.prisma.user.findFirst({
+            where: { firebaseUid: uid }
+          });
+          if (user) {
+            await this.prisma.user.update({
+              where: { id: user.id },
+              data: { fcmTokens: data.fcmTokens },
+            }).catch(err => this.logger.error(`Failed to sync fcmTokens for user ${uid}: ${err.message}`));
+          }
+        }
+      }
+    }, (error) => {
+      this.logger.error('Error listening to Firebase users:', error);
+    });
+
+    // 9. Initial syncs are handled automatically by onSnapshot when it first attaches
   }
 
   private async syncOrder(doc: any, silent = false, isNew = false) {
@@ -929,6 +951,36 @@ export class FirebaseSyncService implements OnModuleInit {
                 signature: SignatureUtil.signLedgerEntry({ userId: driver.userId, orderId: order.id, type: 'DEBT', amount: debtIncrease }),
               },
             });
+          }
+
+          // Sync driver stats back to Firestore directly to avoid circular dependency
+          try {
+            const db = this.firebaseAdmin.getFirestore();
+            if (db) {
+              const driverUser = await this.prisma.user.findUnique({
+                where: { id: driver.userId },
+                include: { driverProfile: true },
+              });
+              if (driverUser && driverUser.firebaseUid) {
+                const wBal = Number(driverUser.walletBalance || 0);
+                await db.collection('users').doc(driverUser.firebaseUid).update({
+                  walletBalance: wBal,
+                }).catch(() => {});
+                
+                if (driverUser.driverProfile) {
+                  const dp = driverUser.driverProfile;
+                  await db.collection('driverProfiles').doc(driverUser.firebaseUid).set({
+                    walletBalance: wBal,
+                    totalEarnings: Number(dp.totalEarnings || 0),
+                    totalTrips: Number(dp.totalTrips || 0),
+                    acceptanceRate: Number(dp.acceptanceRate || 100),
+                    rating: Number(dp.rating || 5.0),
+                  }, { merge: true }).catch(() => {});
+                }
+              }
+            }
+          } catch (err) {
+            this.logger.error(`Failed to sync driver stats to Firestore in sync service: ${err.message}`);
           }
         }
       }

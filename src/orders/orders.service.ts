@@ -999,6 +999,11 @@ export class OrdersService {
             },
           });
         }
+
+        // Synchronize updated wallet & stats to Firestore
+        await this.driversService.syncDriverStatsToFirebase(driver.userId).catch((err) => {
+          this.logger.error(`Failed to sync driver stats to Firestore for ${driver.userId}:`, err.stack);
+        });
       }
     }
 

@@ -23,6 +23,8 @@ export class OnboardingService {
         nationalIdUrl: data.nationalIdUrl,
         driverLicenseUrl: data.driverLicenseUrl,
         bankInfo: data.bankInfo,
+        canDeliver: data.canDeliver !== undefined ? !!data.canDeliver : true,
+        canTransport: data.canTransport !== undefined ? !!data.canTransport : false,
         applicationStatus: ApplicationStatus.PENDING,
         vehicle: {
           upsert: {
@@ -47,6 +49,8 @@ export class OnboardingService {
         nationalIdUrl: data.nationalIdUrl,
         driverLicenseUrl: data.driverLicenseUrl,
         bankInfo: data.bankInfo,
+        canDeliver: data.canDeliver !== undefined ? !!data.canDeliver : true,
+        canTransport: data.canTransport !== undefined ? !!data.canTransport : false,
         applicationStatus: ApplicationStatus.PENDING,
         vehicle: {
           create: {

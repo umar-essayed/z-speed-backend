@@ -515,12 +515,29 @@ export class AdminService {
       data: { role: Role.DRIVER },
     });
 
+    // Sync User capability flags to Firestore
+    try {
+      const db = this.firebase.getFirestore();
+      if (db) {
+        const userDocRef = db.collection('users').doc(profile.userId);
+        await userDocRef.update({
+          role: 'DRIVER',
+          applicationStatus: 'approved',
+          status: 'active',
+          canDeliver: profile.canDeliver,
+          canTransport: profile.canTransport,
+        });
+      }
+    } catch (err) {
+      this.logger.warn(`Failed to sync driver ${profile.userId} approval to Firestore: ${err.message}`);
+    }
+
     // Notify driver
     try {
       await this.notifications.createNotification(
         profile.userId,
         'Application Approved! 🎉',
-        'Congratulations! Your driver application has been approved. You can now start receiving delivery requests.',
+        'Congratulations! Your driver application has been approved. You can now start receiving requests.',
         'driver_approved',
       );
     } catch (err) {
@@ -979,12 +996,29 @@ export class AdminService {
     await docRef.update({ status: 'approved', approvedAt: new Date() });
 
     if (data.userId) {
+      const personalInfo = data.personal || data.formData?.personalInfo || data.rawData?.formData?.personalInfo || {};
+      const category = personalInfo.driverCategory || 'delivery';
+      
+      const canTransport = category === 'transport' || category === 'both';
+      const canDeliver = category === 'delivery' || category === 'both';
+
       const user = await this.prisma.user.findUnique({ where: { id: data.userId } });
       if (user) {
         const profile = await this.prisma.driverProfile.upsert({
           where: { userId: data.userId },
-          update: { applicationStatus: 'APPROVED' as any, isAvailable: true },
-          create: { userId: data.userId, applicationStatus: 'APPROVED' as any, isAvailable: true }
+          update: { 
+            applicationStatus: 'APPROVED' as any, 
+            isAvailable: true,
+            canDeliver,
+            canTransport,
+          },
+          create: { 
+            userId: data.userId, 
+            applicationStatus: 'APPROVED' as any, 
+            isAvailable: true,
+            canDeliver,
+            canTransport,
+          }
         });
 
         if (data.vehicle) {
@@ -1002,6 +1036,16 @@ export class AdminService {
         }
 
         await this.prisma.user.update({ where: { id: data.userId }, data: { role: Role.DRIVER } });
+
+        // Update the user's Firestore document so mobile client refreshes role capabilities instantly
+        const userDocRef = db.collection('users').doc(data.userId);
+        await userDocRef.update({
+          role: 'DRIVER',
+          applicationStatus: 'approved',
+          status: 'active',
+          canTransport,
+          canDeliver,
+        }).catch(() => {});
 
         try {
           await this.notifications.createNotification(

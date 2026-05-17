@@ -68,7 +68,7 @@ export class TransportController {
     return this.transportService.createRide(createRideDto);
   }
 
-  @Get('all')
+  @Get()
   findAll() {
     return this.transportService.findAll();
   }

@@ -33,10 +33,18 @@ async function initFirebase() {
       });
     } else if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_CLIENT_EMAIL) {
       console.log('Initializing Firebase via Environment Variables');
+      let privateKey = process.env.FIREBASE_PRIVATE_KEY;
+      
+      // Clean private key string from quotes if present
+      if (privateKey.startsWith('"') && privateKey.endsWith('"')) {
+        privateKey = privateKey.substring(1, privateKey.length - 1);
+      }
+      privateKey = privateKey.replace(/\\n/g, '\n');
+
       admin.initializeApp({
         credential: admin.credential.cert({
           projectId: process.env.FIREBASE_PROJECT_ID,
-          privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+          privateKey: privateKey,
           clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
         }),
       });
@@ -47,14 +55,17 @@ async function initFirebase() {
 }
 
 async function main() {
-  console.log('📚 Initializing Bookstore Seeding Script...');
+  console.log('📚 Initializing Bookstore Seeding Script (Firestore & SQL)...');
+  
+  await initFirebase();
+  const db = admin.firestore();
   
   const email = 'bookstore@zspeedapp.com';
   const password = 'ZSpeed@Bookstore55';
   let firebaseUid = 'bookstore-fb-auth-uid-mock';
   let supabaseId = '';
 
-  // 2. Create/Retrieve Supabase Auth User
+  // 1. Create/Retrieve Supabase Auth User
   const supabaseUrl = process.env.SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -106,7 +117,7 @@ async function main() {
     throw err;
   }
 
-  // 3. Create/Retrieve User in PostgreSQL
+  // 2. Create/Retrieve User in PostgreSQL
   const dbUser = await prisma.user.upsert({
     where: { email },
     update: {
@@ -128,9 +139,12 @@ async function main() {
   });
   console.log(`✅ Verified database Vendor user: ${dbUser.email} (ID: ${dbUser.id})`);
 
-  // 3. Create Z-SPEED Premium Bookstore Restaurant Entity
+  // Fixed Bookstore Restaurant IDs
+  const restaurantId = 'df5a8ac3-b836-4857-af1c-b707326f4a15';
+
+  // 3. Create Z-SPEED Premium Bookstore Restaurant Entity in PostgreSQL
   const restaurant = await prisma.restaurant.upsert({
-    where: { firebaseId: `bookstore-ref-${firebaseUid}` },
+    where: { id: restaurantId },
     update: {
       ownerId: dbUser.id,
       name: 'Z-SPEED Premium Bookstore',
@@ -154,8 +168,10 @@ async function main() {
       deliveryFee: 15.0,
       minimumOrder: 50.0,
       autoAcceptOrders: true,
+      firebaseId: restaurantId,
     },
     create: {
+      id: restaurantId,
       ownerId: dbUser.id,
       name: 'Z-SPEED Premium Bookstore',
       nameAr: 'مكتبة زد سبيد الفاخرة',
@@ -163,7 +179,7 @@ async function main() {
       descriptionAr: 'منصتك الفاخرة للكتب، الروايات، الأدوات المدرسية، والمستلزمات المكتبية والهندسية.',
       logoUrl: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=200&h=200&fit=crop',
       coverImageUrl: 'https://images.unsplash.com/photo-1521587760476-6c12a4b040da?w=1000&h=400&fit=crop',
-      firebaseId: `bookstore-ref-${firebaseUid}`,
+      firebaseId: restaurantId,
       isOpen: true,
       isActive: true,
       status: AccountStatus.ACTIVE,
@@ -190,46 +206,95 @@ async function main() {
       ],
     },
   });
-  console.log(`✅ Verified Bookstore store: ${restaurant.name} (ID: ${restaurant.id})`);
+  console.log(`✅ Verified database Bookstore store: ${restaurant.name} (ID: ${restaurant.id})`);
 
-  // 4. Create Menu Sections (Default Categories)
+  // 4. Create Bookstore Restaurant document in Firestore
+  await db.collection('restaurants').doc(restaurantId).set({
+    ownerId: dbUser.id,
+    name: 'Z-SPEED Premium Bookstore',
+    nameAr: 'مكتبة زد سبيد الفاخرة',
+    description: 'Your premium catalog for books, novels, school supplies, engineering and office tools.',
+    descriptionAr: 'منصتك الفاخرة للكتب، الروايات، الأدوات المدرسية، والمستلزمات المكتبية والهندسية.',
+    logoUrl: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=200&h=200&fit=crop',
+    coverImageUrl: 'https://images.unsplash.com/photo-1521587760476-6c12a4b040da?w=1000&h=400&fit=crop',
+    status: 'ACTIVE',
+    isActive: true,
+    isOpen: true,
+    vendorType: 'bookstore',
+    address: 'Tahrir Square, Downtown Cairo',
+    city: 'Cairo',
+    latitude: 30.0444,
+    longitude: 31.2357,
+    deliveryRadiusKm: 15.0,
+    deliveryTimeMin: 20,
+    deliveryTimeMax: 45,
+    deliveryFeeMode: 'fixed',
+    deliveryFee: 15.0,
+    minimumOrder: 50.0,
+    autoAcceptOrders: true,
+    rating: 5.0,
+    reviewsCount: 0,
+    updatedAt: new Date(),
+  }, { merge: true });
+  console.log(`✅ Synced Bookstore storefront to Firestore ('restaurants/${restaurantId}')`);
+
+  // 5. Create Menu Sections (Default Categories)
   const sectionsData = [
-    { name: 'School Supplies & Bags', nameAr: 'الأدوات المدرسية والشنط', sortOrder: 1 },
-    { name: 'Pens & Writing Instruments', nameAr: 'الأقلام وأدوات الكتابة', sortOrder: 2 },
-    { name: 'Books & Novels', nameAr: 'الكتب والروايات', sortOrder: 3 },
-    { name: 'Educational Textbooks', nameAr: 'الكتب الخارجية والمذكرات', sortOrder: 4 },
-    { name: 'Office Equipment', nameAr: 'الأجهزة المكتبية والإلكترونيات', sortOrder: 5 },
+    { id: 'bookstore-sec-1', name: 'School Supplies & Bags', nameAr: 'الأدوات المدرسية والشنط', sortOrder: 1 },
+    { id: 'bookstore-sec-2', name: 'Pens & Writing Instruments', nameAr: 'الأقلام وأدوات الكتابة', sortOrder: 2 },
+    { id: 'bookstore-sec-3', name: 'Books & Novels', nameAr: 'الكتب والروايات', sortOrder: 3 },
+    { id: 'bookstore-sec-4', name: 'Educational Textbooks', nameAr: 'الكتب الخارجية والمذكرات', sortOrder: 4 },
+    { id: 'bookstore-sec-5', name: 'Office Equipment', nameAr: 'الأجهزة المكتبية والإلكترونيات', sortOrder: 5 },
   ];
 
-  const sections: Record<string, string> = {};
+  const sectionsSqlIds: Record<string, string> = {};
 
   for (const sec of sectionsData) {
+    // Upsert section in PostgreSQL
     const dbSec = await prisma.menuSection.upsert({
-      where: { firebaseId: `bookstore-sec-${sec.sortOrder}-${restaurant.id}` },
+      where: { id: sec.id },
       update: {
         name: sec.name,
         nameAr: sec.nameAr,
         sortOrder: sec.sortOrder,
         isActive: true,
+        firebaseId: sec.id,
       },
       create: {
+        id: sec.id,
         restaurantId: restaurant.id,
         name: sec.name,
         nameAr: sec.nameAr,
         sortOrder: sec.sortOrder,
         isActive: true,
-        firebaseId: `bookstore-sec-${sec.sortOrder}-${restaurant.id}`,
+        firebaseId: sec.id,
       },
     });
-    sections[sec.name] = dbSec.id;
-    console.log(`  📁 Verified Section: ${dbSec.name} / ${dbSec.nameAr}`);
+    sectionsSqlIds[sec.name] = dbSec.id;
+
+    // Create section document in Firestore
+    await db.collection('restaurants').doc(restaurantId)
+      .collection('menuSections').doc(sec.id).set({
+        id: sec.id,
+        restaurantId: restaurantId,
+        name: sec.name,
+        nameAr: sec.nameAr,
+        sortOrder: sec.sortOrder,
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }, { merge: true });
+
+    console.log(`  📁 Verified Section: ${dbSec.name} / ${dbSec.nameAr} inside Firestore & PostgreSQL`);
   }
 
-  // 5. Prepopulate beautiful Bookstore Items
+  // 6. Prepopulate beautiful Bookstore Items in PostgreSQL and Firestore
   const itemsData = [
     // Section: School Supplies & Bags
     {
-      section: 'School Supplies & Bags',
+      id: 'bookstore-item-geometry-set',
+      sectionName: 'School Supplies & Bags',
+      sectionId: 'bookstore-sec-1',
       name: 'Premium Geometry Set',
       nameAr: 'علبة هندسة فاخرة متكاملة',
       price: 75.0,
@@ -239,7 +304,9 @@ async function main() {
       stockQuantity: 120,
     },
     {
-      section: 'School Supplies & Bags',
+      id: 'bookstore-item-school-backpack',
+      sectionName: 'School Supplies & Bags',
+      sectionId: 'bookstore-sec-1',
       name: 'Ergonomic Waterproof Backpack',
       nameAr: 'حقيبة مدرسية مريحة ومقاومة للماء',
       price: 450.0,
@@ -253,7 +320,9 @@ async function main() {
 
     // Section: Pens & Writing Instruments
     {
-      section: 'Pens & Writing Instruments',
+      id: 'bookstore-item-faber-finepen',
+      sectionName: 'Pens & Writing Instruments',
+      sectionId: 'bookstore-sec-2',
       name: 'Faber-Castell Finepen 0.4 (Box of 10)',
       nameAr: 'علبة أقلام فايبر كاستل ١٠ قطع',
       price: 120.0,
@@ -263,7 +332,9 @@ async function main() {
       stockQuantity: 90,
     },
     {
-      section: 'Pens & Writing Instruments',
+      id: 'bookstore-item-stabilo-highlighters',
+      sectionName: 'Pens & Writing Instruments',
+      sectionId: 'bookstore-sec-2',
       name: 'Stabilo Boss Neon Highlighters (6 colors)',
       nameAr: 'طقم أقلام تحديد ستابيلو ٦ ألوان',
       price: 95.0,
@@ -275,7 +346,9 @@ async function main() {
 
     // Section: Books & Novels
     {
-      section: 'Books & Novels',
+      id: 'bookstore-item-naguib-palace',
+      sectionName: 'Books & Novels',
+      sectionId: 'bookstore-sec-3',
       name: 'The Palace Walk - Naguib Mahfouz',
       nameAr: 'رواية بين القصرين - نجيب محفوظ',
       price: 140.0,
@@ -285,7 +358,9 @@ async function main() {
       stockQuantity: 20,
     },
     {
-      section: 'Books & Novels',
+      id: 'bookstore-item-coelho-alchemist',
+      sectionName: 'Books & Novels',
+      sectionId: 'bookstore-sec-3',
       name: 'The Alchemist - Paulo Coelho',
       nameAr: 'رواية الخيميائي - باولو كويلو',
       price: 95.0,
@@ -297,7 +372,9 @@ async function main() {
 
     // Section: Educational Textbooks
     {
-      section: 'Educational Textbooks',
+      id: 'bookstore-item-moasser-math',
+      sectionName: 'Educational Textbooks',
+      sectionId: 'bookstore-sec-4',
       name: 'El-Moasser Mathematics Prep 3 (2026 Edition)',
       nameAr: 'كتاب المعاصر رياضيات الصف الثالث الإعدادي ٢٠٢٦',
       price: 185.0,
@@ -308,12 +385,14 @@ async function main() {
     },
   ];
 
-  for (const item of itemsData) {
-    const sectionId = sections[item.section];
-    if (!sectionId) continue;
+  for (let idx = 0; idx < itemsData.length; idx++) {
+    const item = itemsData[idx];
+    const sectionSqlId = sectionsSqlIds[item.sectionName];
+    if (!sectionSqlId) continue;
 
+    // Upsert food item in PostgreSQL
     await prisma.foodItem.upsert({
-      where: { firebaseId: `bookstore-item-${item.name.toLowerCase().replace(/[^a-z0-9]/g, '-')}` },
+      where: { id: item.id },
       update: {
         name: item.name,
         nameAr: item.nameAr,
@@ -325,9 +404,11 @@ async function main() {
         imageUrl: item.imageUrl,
         stockQuantity: item.stockQuantity,
         isAvailable: true,
+        firebaseId: item.id,
       },
       create: {
-        sectionId,
+        id: item.id,
+        sectionId: sectionSqlId,
         name: item.name,
         nameAr: item.nameAr,
         price: item.price,
@@ -337,18 +418,43 @@ async function main() {
         descriptionAr: item.descriptionAr,
         imageUrl: item.imageUrl,
         stockQuantity: item.stockQuantity,
-        firebaseId: `bookstore-item-${item.name.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
+        firebaseId: item.id,
         isAvailable: true,
       },
     });
-    console.log(`  🔖 Verified Item: ${item.name} / ${item.nameAr} (Price: ${item.price} EGP)`);
+
+    // Create item document in Firestore
+    await db.collection('restaurants').doc(restaurantId)
+      .collection('menuSections').doc(item.sectionId)
+      .collection('items').doc(item.id).set({
+        id: item.id,
+        sectionId: item.sectionId,
+        restaurantId: restaurantId,
+        name: item.name,
+        nameAr: item.nameAr,
+        price: item.price,
+        originalPrice: item.originalPrice || null,
+        isOnSale: item.isOnSale || false,
+        description: item.description,
+        descriptionAr: item.descriptionAr,
+        imageUrl: item.imageUrl,
+        stockQuantity: item.stockQuantity,
+        isAvailable: true,
+        prepTimeMin: 15,
+        allergens: [],
+        sortOrder: idx,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }, { merge: true });
+
+    console.log(`  🔖 Verified Item: ${item.name} / ${item.nameAr} in Firestore & PostgreSQL`);
   }
 
-  console.log('\n🌟 SUCCESS: Premium Bookstore Account & Catalog Populated Successfully! 🌟');
-  console.log('========================================================================');
+  console.log('\n🌟 SUCCESS: Premium Bookstore Account & Catalog Populated Successfully in Firestore & PostgreSQL! 🌟');
+  console.log('==============================================================================================');
   console.log(`📧 Vendor Login Email: ${email}`);
   console.log(`🔑 Vendor Login Password: ${password}`);
-  console.log('========================================================================\n');
+  console.log('==============================================================================================\n');
 }
 
 main()

@@ -993,6 +993,11 @@ export class FirebaseSyncService implements OnModuleInit {
           await this.ordersService.awardLoyaltyPointsForOrder(order.customerId, pointsEarned);
         }
       }
+
+      // Close active prescription chat if this is a pharmacy order
+      if (order.restaurant && order.restaurant.vendorType === 'pharmacy') {
+        await this.closePrescriptionChat(order.customerId, order.restaurantId).catch(() => {});
+      }
     } catch (err) {
       this.logger.error(`Failed to process earnings for order ${order.id}:`, err);
     }
@@ -1036,6 +1041,32 @@ export class FirebaseSyncService implements OnModuleInit {
     } catch (error) {
       this.logger.error(`Failed to sync status to Firebase for Postgres Order ${postgresOrderId}:`, error);
       throw new Error(`Failed to sync status with Firebase: ${error.message}`);
+    }
+  }
+
+  // Closes the live prescription chat once the order is delivered
+  async closePrescriptionChat(customerId: string, restaurantId: string) {
+    const firestore = this.firebaseAdmin.getFirestore();
+    if (!firestore) return;
+
+    try {
+      const customerUser = await this.prisma.user.findUnique({
+        where: { id: customerId }
+      });
+      const restaurant = await this.prisma.restaurant.findUnique({
+        where: { id: restaurantId }
+      });
+
+      if (customerUser && restaurant) {
+        const chatId = `chat_cust_${customerUser.firebaseUid}_pharm_${restaurant.firebaseId}`;
+        await firestore.collection('chats').doc(chatId).update({
+          isOpen: false,
+          updatedAt: new Date(),
+        }).catch(() => {});
+        this.logger.log(`Successfully closed pharmacy chat ${chatId} upon order delivery.`);
+      }
+    } catch (e) {
+      this.logger.error('Failed to close pharmacy prescription chat:', e);
     }
   }
 

@@ -1014,6 +1014,11 @@ export class OrdersService {
       await this.loyaltyService.addPoints(order.customerId, pointsEarned);
     }
 
+    // Close active prescription chat if this is a pharmacy order
+    if (restaurant && restaurant.vendorType === 'pharmacy') {
+      await this.firebaseSync.closePrescriptionChat(order.customerId, order.restaurantId).catch(() => {});
+    }
+
     this.logger.log(`Order ${order.id} delivered — Financial split completed and Driver Debt updated.`);
   }
 

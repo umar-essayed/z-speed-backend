@@ -33,12 +33,16 @@ export class UploadController {
   )
   async uploadFile(
     @UploadedFile() file: Express.Multer.File,
+    @Body('customerId') customerId: string,
     @Body('folder') folder?: string,
   ) {
     if (!file) {
       throw new BadRequestException('File is required');
     }
-    const url = await this.uploadService.uploadFile(file, folder || 'uploads');
+    
+    // Use a safe folder under the user namespace
+    const safeFolder = folder ?? (customerId ? `users/${customerId}/prescriptions` : 'uploads');
+    const url = await this.uploadService.uploadFile(file, safeFolder);
     return { url };
   }
 }

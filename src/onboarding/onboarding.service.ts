@@ -22,6 +22,9 @@ export class OnboardingService {
       data: { role: Role.DRIVER }
     });
 
+    const isTransport = data.canTransport !== undefined ? !!data.canTransport : false;
+    const isDeliver = isTransport ? false : (data.canDeliver !== undefined ? !!data.canDeliver : true);
+
     return this.prisma.driverProfile.upsert({
       where: { userId },
       update: {
@@ -29,8 +32,8 @@ export class OnboardingService {
         nationalIdUrl: data.nationalIdUrl,
         driverLicenseUrl: data.driverLicenseUrl,
         bankInfo: data.bankInfo,
-        canDeliver: data.canDeliver !== undefined ? !!data.canDeliver : true,
-        canTransport: data.canTransport !== undefined ? !!data.canTransport : false,
+        canDeliver: isDeliver,
+        canTransport: isTransport,
         applicationStatus: ApplicationStatus.PENDING,
         vehicle: {
           upsert: {
@@ -55,8 +58,8 @@ export class OnboardingService {
         nationalIdUrl: data.nationalIdUrl,
         driverLicenseUrl: data.driverLicenseUrl,
         bankInfo: data.bankInfo,
-        canDeliver: data.canDeliver !== undefined ? !!data.canDeliver : true,
-        canTransport: data.canTransport !== undefined ? !!data.canTransport : false,
+        canDeliver: isDeliver,
+        canTransport: isTransport,
         applicationStatus: ApplicationStatus.PENDING,
         vehicle: {
           create: {

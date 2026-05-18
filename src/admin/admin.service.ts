@@ -1001,8 +1001,8 @@ export class AdminService {
       const personalInfo = data.personal || data.formData?.personalInfo || data.rawData?.formData?.personalInfo || {};
       const category = personalInfo.driverCategory || 'delivery';
       
-      const canTransport = category === 'transport' || category === 'both';
-      const canDeliver = category === 'delivery' || category === 'both';
+      const canTransport = category === 'transport';
+      const canDeliver = !canTransport;
 
       const user = await this.prisma.user.findUnique({ where: { id: data.userId } });
       if (user) {

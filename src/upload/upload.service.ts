@@ -22,6 +22,8 @@ export class UploadService {
           folder: `z-speed/${folder}`,
           use_filename: true,
           unique_filename: true,
+          quality: 'auto:eco', // Maximum compression
+          fetch_format: 'auto', // Auto-convert to best format (e.g. webp)
         },
         (error, result) => {
           if (error || !result) {

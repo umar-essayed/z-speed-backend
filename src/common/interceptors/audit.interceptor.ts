@@ -64,7 +64,9 @@ export class AuditInterceptor implements NestInterceptor {
   }) {
     try {
       await this.prisma.auditLog.create({ data });
-    } catch (err) {
+    } catch (err: any) {
+      // Silently skip FK violations when userId is a Firebase UID not synced to Postgres
+      if (err?.code === 'P2003') return;
       this.logger.error(`Failed to write audit log: ${err}`);
     }
   }

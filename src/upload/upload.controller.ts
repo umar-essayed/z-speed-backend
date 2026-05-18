@@ -45,4 +45,29 @@ export class UploadController {
     const url = await this.uploadService.uploadFile(file, safeFolder);
     return { url };
   }
+
+  @Post('base64')
+  async uploadBase64(
+    @Body('fileBase64') fileBase64: string,
+    @Body('fileName') fileName: string,
+    @Body('customerId') customerId?: string,
+    @Body('folder') folder?: string,
+  ) {
+    if (!fileBase64 || !fileName) {
+      throw new BadRequestException('fileBase64 and fileName are required');
+    }
+
+    const buffer = Buffer.from(fileBase64, 'base64');
+    
+    // Construct a faux file object to pass to uploadService
+    const fauxFile = {
+      buffer,
+      originalname: fileName,
+      mimetype: 'application/octet-stream', // Could map extensions if needed, but not strictly required
+    } as Express.Multer.File;
+
+    const safeFolder = folder ?? (customerId ? `users/${customerId}/prescriptions` : 'uploads');
+    const url = await this.uploadService.uploadFile(fauxFile, safeFolder);
+    return { url };
+  }
 }

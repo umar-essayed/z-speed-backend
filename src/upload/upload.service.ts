@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { v2 as cloudinary } from 'cloudinary';
 import * as streamifier from 'streamifier';
 import { FirebaseAdminService } from '../firebase/firebase-admin.service';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class UploadService {
@@ -11,6 +12,7 @@ export class UploadService {
   constructor(
     private readonly configService: ConfigService,
     private readonly firebaseAdmin: FirebaseAdminService,
+    private readonly prisma: PrismaService,
   ) {
     cloudinary.config({
       cloud_name: this.configService.get<string>('CLOUDINARY_CLOUD_NAME'),
@@ -53,20 +55,35 @@ export class UploadService {
     const firestore = this.firebaseAdmin.getFirestore();
     if (!firestore) throw new InternalServerErrorException('Firestore not initialized');
 
+    // Fetch proper Firebase IDs from PostgreSQL
+    const restaurant = await this.prisma.restaurant.findUnique({
+      where: { id: data.pharmacyId },
+      select: { firebaseId: true }
+    });
+    const fbRestaurantId = restaurant?.firebaseId || data.pharmacyId;
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: data.customerId },
+      select: { firebaseUid: true }
+    });
+    const fbCustomerId = user?.firebaseUid || data.customerId;
+
     const requestRef = firestore.collection('prescription_requests').doc();
     const requestId = requestRef.id;
-    const chatId = `chat_cust_${data.customerId}_pharm_${data.pharmacyId}`;
+    // Keep chatId logic consistent using the Firebase IDs
+    const chatId = `chat_cust_${fbCustomerId}_pharm_${fbRestaurantId}`;
     const now = new Date();
 
     // 1. Create Prescription Request
     await requestRef.set({
       id: requestId,
-      customerId: data.customerId,
+      customerId: fbCustomerId,
       customerName: data.customerName,
       customerPhone: data.customerPhone,
-      restaurantId: data.pharmacyId,
+      restaurantId: fbRestaurantId,
       restaurantName: data.pharmacyName,
       prescriptionImageUrl: data.imageUrl,
+      imageUrl: data.imageUrl, // For backward compatibility with vendor web
       status: 'pending',
       chatId: chatId,
       items: [],
@@ -81,12 +98,12 @@ export class UploadService {
     if (!chatSnapshot.exists) {
       await chatRef.set({
         id: chatId,
-        customerId: data.customerId,
+        customerId: fbCustomerId,
         customerName: data.customerName,
-        restaurantId: data.pharmacyId,
+        restaurantId: fbRestaurantId,
         restaurantName: data.pharmacyName,
         lastMessage: lastMsg,
-        lastMessageSenderId: data.customerId,
+        lastMessageSenderId: fbCustomerId,
         lastMessageAt: now,
         isOpen: true,
         createdAt: now,
@@ -94,7 +111,7 @@ export class UploadService {
     } else {
       await chatRef.update({
         lastMessage: lastMsg,
-        lastMessageSenderId: data.customerId,
+        lastMessageSenderId: fbCustomerId,
         lastMessageAt: now,
         isOpen: true,
       });
@@ -102,7 +119,7 @@ export class UploadService {
 
     // 3. Add first message
     await chatRef.collection('messages').add({
-      senderId: data.customerId,
+      senderId: fbCustomerId,
       senderRole: 'customer',
       text: 'I uploaded my prescription. Please review it!',
       imageUrl: data.imageUrl,

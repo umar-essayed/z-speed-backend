@@ -2,12 +2,16 @@ import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common
 import { ConfigService } from '@nestjs/config';
 import { v2 as cloudinary } from 'cloudinary';
 import * as streamifier from 'streamifier';
+import { FirebaseAdminService } from '../firebase/firebase-admin.service';
 
 @Injectable()
 export class UploadService {
   private readonly logger = new Logger(UploadService.name);
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly firebaseAdmin: FirebaseAdminService,
+  ) {
     cloudinary.config({
       cloud_name: this.configService.get<string>('CLOUDINARY_CLOUD_NAME'),
       api_key: this.configService.get<string>('CLOUDINARY_API_KEY'),
@@ -36,6 +40,76 @@ export class UploadService {
 
       streamifier.createReadStream(file.buffer).pipe(uploadStream);
     });
+  }
+
+  async createPrescriptionChat(data: {
+    customerId: string;
+    customerName: string;
+    customerPhone: string;
+    pharmacyId: string;
+    pharmacyName: string;
+    imageUrl: string;
+  }): Promise<{ requestId: string; chatId: string }> {
+    const firestore = this.firebaseAdmin.getFirestore();
+    if (!firestore) throw new InternalServerErrorException('Firestore not initialized');
+
+    const requestRef = firestore.collection('prescription_requests').doc();
+    const requestId = requestRef.id;
+    const chatId = `chat_cust_${data.customerId}_pharm_${data.pharmacyId}`;
+    const now = new Date();
+
+    // 1. Create Prescription Request
+    await requestRef.set({
+      id: requestId,
+      customerId: data.customerId,
+      customerName: data.customerName,
+      customerPhone: data.customerPhone,
+      restaurantId: data.pharmacyId,
+      restaurantName: data.pharmacyName,
+      prescriptionImageUrl: data.imageUrl,
+      status: 'pending',
+      chatId: chatId,
+      items: [],
+      createdAt: now,
+    });
+
+    // 2. Initialize or Update Chat Session
+    const chatRef = firestore.collection('chats').doc(chatId);
+    const chatSnapshot = await chatRef.get();
+    const lastMsg = 'Prescription uploaded successfully!';
+
+    if (!chatSnapshot.exists) {
+      await chatRef.set({
+        id: chatId,
+        customerId: data.customerId,
+        customerName: data.customerName,
+        restaurantId: data.pharmacyId,
+        restaurantName: data.pharmacyName,
+        lastMessage: lastMsg,
+        lastMessageSenderId: data.customerId,
+        lastMessageAt: now,
+        isOpen: true,
+        createdAt: now,
+      });
+    } else {
+      await chatRef.update({
+        lastMessage: lastMsg,
+        lastMessageSenderId: data.customerId,
+        lastMessageAt: now,
+        isOpen: true,
+      });
+    }
+
+    // 3. Add first message
+    await chatRef.collection('messages').add({
+      senderId: data.customerId,
+      senderRole: 'customer',
+      text: 'I uploaded my prescription. Please review it!',
+      imageUrl: data.imageUrl,
+      createdAt: now,
+    });
+
+    return { requestId, chatId };
   }
 
   async deleteFile(publicId: string): Promise<void> {

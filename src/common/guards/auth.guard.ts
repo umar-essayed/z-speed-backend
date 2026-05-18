@@ -68,7 +68,19 @@ export class AuthGuard implements CanActivate {
           email: decoded.email,
         };
       } catch {
-        throw new UnauthorizedException('جلسة غير صالحة أو منتهية الصلاحية');
+        // Second Fallback: Firebase Auth Token
+        try {
+          const admin = require('firebase-admin');
+          const decodedToken = await admin.auth().verifyIdToken(token);
+          request.user = {
+            dbUserId: decodedToken.uid,
+            userId: decodedToken.uid,
+            email: decodedToken.email,
+            role: decodedToken.role || 'CUSTOMER',
+          };
+        } catch (firebaseErr) {
+          throw new UnauthorizedException('جلسة غير صالحة أو منتهية الصلاحية');
+        }
       }
     }
 

@@ -818,3 +818,27 @@ model Favorite {
   @@unique([userId, restaurantId, foodItemId])
   @@map("favorites")
 }
+
+model PrescriptionRequest {
+  id                   String   @id @default(uuid())
+  customerId           String
+  customerName         String
+  customerPhone        String
+  restaurantId         String
+  restaurantName       String
+  prescriptionImageUrl String
+  imageUrl             String
+  status               String   @default("pending")
+  chatId               String
+  items                Json?    // Array of quoted items
+  subtotal             Float?
+  deliveryFee          Float?
+  tax                  Float?
+  serviceFee           Float?
+  total                Float?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@map("prescription_requests")
+}
+

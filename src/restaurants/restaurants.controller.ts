@@ -135,4 +135,22 @@ export class VendorRestaurantsController {
   ) {
     return this.restaurantsService.getAnalytics(id, userId, range);
   }
+
+  @Get(':id/prescriptions')
+  async getPrescriptions(
+    @CurrentUser('userId') userId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.restaurantsService.getPrescriptions(id, userId);
+  }
+
+  @Patch(':id/prescriptions/:prescriptionId')
+  async updatePrescription(
+    @CurrentUser('userId') userId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('prescriptionId') prescriptionId: string,
+    @Body() dto: any,
+  ) {
+    return this.restaurantsService.updatePrescription(id, prescriptionId, userId, dto);
+  }
 }

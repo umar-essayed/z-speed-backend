@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { AccountStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { FirebaseAdminService } from '../firebase/firebase-admin.service';
 import {
   CreateRestaurantDto,
   UpdateRestaurantDto,
@@ -16,7 +17,10 @@ import {
 export class RestaurantsService {
   private readonly logger = new Logger(RestaurantsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly firebaseAdmin: FirebaseAdminService,
+  ) {}
 
   /**
    * Create a new restaurant (VENDOR). Status defaults to PENDING_VERIFICATION.
@@ -610,6 +614,64 @@ export class RestaurantsService {
       orderVolume,
       peakHours: hours
     };
+  }
+
+  async getPrescriptions(restaurantId: string, ownerId: string) {
+    const restaurant = await this.verifyOwnership(restaurantId, ownerId);
+    
+    // Fetch from PostgreSQL, mapping the restaurant's Firebase ID if it differs
+    const targetRestaurantId = restaurant.firebaseId || restaurant.id;
+    return this.prisma.prescriptionRequest.findMany({
+      where: { restaurantId: targetRestaurantId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async updatePrescription(
+    restaurantId: string,
+    prescriptionId: string,
+    ownerId: string,
+    data: any,
+  ) {
+    await this.verifyOwnership(restaurantId, ownerId);
+
+    // Update in PostgreSQL
+    const updated = await this.prisma.prescriptionRequest.update({
+      where: { id: prescriptionId },
+      data: {
+        status: data.status,
+        items: data.items !== undefined ? data.items : undefined,
+        subtotal: data.subtotal !== undefined ? parseFloat(data.subtotal) : undefined,
+        deliveryFee: data.deliveryFee !== undefined ? parseFloat(data.deliveryFee) : undefined,
+        tax: data.tax !== undefined ? parseFloat(data.tax) : undefined,
+        serviceFee: data.serviceFee !== undefined ? parseFloat(data.serviceFee) : undefined,
+        total: data.total !== undefined ? parseFloat(data.total) : undefined,
+      },
+    });
+
+    // Sync to Firestore for real-time customer app compatibility
+    try {
+      const firestore = this.firebaseAdmin.getFirestore();
+      if (firestore) {
+        const updateData: any = {
+          status: updated.status,
+          updatedAt: new Date(),
+        };
+        if (updated.items) updateData.items = updated.items;
+        if (updated.subtotal !== null && updated.subtotal !== undefined) updateData.subtotal = updated.subtotal;
+        if (updated.deliveryFee !== null && updated.deliveryFee !== undefined) updateData.deliveryFee = updated.deliveryFee;
+        if (updated.tax !== null && updated.tax !== undefined) updateData.tax = updated.tax;
+        if (updated.serviceFee !== null && updated.serviceFee !== undefined) updateData.serviceFee = updated.serviceFee;
+        if (updated.total !== null && updated.total !== undefined) updateData.total = updated.total;
+
+        await firestore.collection('prescription_requests').doc(prescriptionId).set(updateData, { merge: true });
+        this.logger.log(`Synced prescription request ${prescriptionId} status update to Firestore`);
+      }
+    } catch (fsErr) {
+      this.logger.error(`Failed to sync prescription status update to Firestore: ${fsErr.message}`);
+    }
+
+    return updated;
   }
 
   /**

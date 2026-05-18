@@ -74,7 +74,7 @@ export class UploadService {
     const chatId = `chat_cust_${fbCustomerId}_pharm_${fbRestaurantId}`;
     const now = new Date();
 
-    // 1. Create Prescription Request
+    // 1. Create Prescription Request in Firestore
     await requestRef.set({
       id: requestId,
       customerId: fbCustomerId,
@@ -89,6 +89,27 @@ export class UploadService {
       items: [],
       createdAt: now,
     });
+
+    // 1b. Create Prescription Request in PostgreSQL for vendor-dashboard robustness
+    try {
+      await this.prisma.prescriptionRequest.create({
+        data: {
+          id: requestId,
+          customerId: fbCustomerId,
+          customerName: data.customerName,
+          customerPhone: data.customerPhone,
+          restaurantId: fbRestaurantId,
+          restaurantName: data.pharmacyName,
+          prescriptionImageUrl: data.imageUrl,
+          imageUrl: data.imageUrl,
+          status: 'pending',
+          chatId: chatId,
+          items: [],
+        }
+      });
+    } catch (dbErr) {
+      this.logger.error(`Failed to save prescription request to PostgreSQL: ${dbErr.message}`);
+    }
 
     // 2. Initialize or Update Chat Session
     const chatRef = firestore.collection('chats').doc(chatId);

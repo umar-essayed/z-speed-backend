@@ -1,0 +1,100 @@
+{
+  "pharmacyId": "ef6a8ac3-b836-4857-af1c-b707326f4a16",
+  "totalRequests": 9,
+  "requests": [
+    {
+      "id": "1LTkofzB9kCUYBrInL4x",
+      "restaurantId": "ef6a8ac3-b836-4857-af1c-b707326f4a16",
+      "status": "pending",
+      "customerName": "حواوشي"
+    },
+    {
+      "id": "AWa7zC96nc0p9fPAqTYO",
+      "restaurantId": "ef6a8ac3-b836-4857-af1c-b707326f4a16",
+      "status": "pending",
+      "customerName": "حواوشي"
+    },
+    {
+      "id": "FnorD5wQ1RRq9kdhbOnV",
+      "restaurantId": "ef6a8ac3-b836-4857-af1c-b707326f4a16",
+      "status": "pending",
+      "customerName": "حواوشي"
+    },
+    {
+      "id": "HJb9qNLYKXW6bWO0eNWl",
+      "restaurantId": "ef6a8ac3-b836-4857-af1c-b707326f4a16",
+      "status": "pending",
+      "customerName": "حواوشي"
+    },
+    {
+      "id": "HwV5EBXAVjuLu2buB2Go",
+      "restaurantId": "ef6a8ac3-b836-4857-af1c-b707326f4a16",
+      "status": "pending",
+      "customerName": "حواوشي"
+    },
+    {
+      "id": "SsLOltl47ouUsMeJbROP",
+      "restaurantId": "ef6a8ac3-b836-4857-af1c-b707326f4a16",
+      "status": "pending",
+      "customerName": "حواوشي"
+    },
+    {
+      "id": "Y2immjktwgCRXr2CKDsg",
+      "restaurantId": "ef6a8ac3-b836-4857-af1c-b707326f4a16",
+      "status": "pending",
+      "customerName": "حواوشي"
+    },
+    {
+      "id": "cdDCprAYW8TuqHERvlDF",
+      "restaurantId": "ef6a8ac3-b836-4857-af1c-b707326f4a16",
+      "status": "pending",
+      "customerName": "حواوشي"
+    },
+    {
+      "id": "eLWv6EC6AthYYwjDR3Za",
+      "restaurantId": "ef6a8ac3-b836-4857-af1c-b707326f4a16",
+      "status": "pending",
+      "customerName": "حواوشي"
+    }
+  ],
+  "userDoc": {
+    "role": "VENDOR",
+    "name": "Z-SPEED Pharmacy Owner",
+    "type": "restaurant",
+    "email": "pharmacy@zspeedapp.com",
+    "updatedAt": {
+      "_seconds": 1779130974,
+      "_nanoseconds": 834000000
+    }
+  },
+  "restDoc": {
+    "vendorType": "pharmacy",
+    "city": "Cairo",
+    "coverImageUrl": "https://images.unsplash.com/photo-1586015555751-63bb77f4322a?w=1000&h=400&fit=crop",
+    "latitude": 30.0444,
+    "rating": 5,
+    "description": "Your premium 24/7 destination for prescription medicine, dermatological skincare, infant wellness, and healthcare supplements.",
+    "reviewsCount": 0,
+    "isActive": true,
+    "ownerId": "7273f057-17f5-473a-9252-ce1df0053fe4",
+    "deliveryTimeMax": 45,
+    "deliveryFeeMode": "fixed",
+    "minimumOrder": 50,
+    "longitude": 31.2357,
+    "updatedAt": {
+      "_seconds": 1779119838,
+      "_nanoseconds": 291000000
+    },
+    "address": "Tahrir Square, Downtown Cairo",
+    "nameAr": "صيدلية زد سبيد الفاخرة",
+    "descriptionAr": "وجهتك الفاخرة على مدار الساعة للأدوية الطبية، مستحضرات التجميل العلاجية، رعاية الأطفال، والمكملات الغذائية.",
+    "deliveryRadiusKm": 15,
+    "logoUrl": "https://images.unsplash.com/photo-1576091160550-2173dba999ef?w=200&h=200&fit=crop",
+    "deliveryFee": 15,
+    "isOpen": true,
+    "autoAcceptOrders": true,
+    "name": "Z-SPEED Premium Pharmacy",
+    "deliveryTimeMin": 20,
+    "status": "ACTIVE"
+  }
+}

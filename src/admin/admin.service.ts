@@ -481,6 +481,7 @@ export class AdminService {
         phone: d.user.phone || '',
         nationalId: d.nationalId,
         dateOfBirth: d.dateOfBirth,
+        driverCategory: d.canTransport ? 'transport' : (d.canDeliver ? 'delivery' : null),
       },
       vehicle: d.vehicle ? {
         type: d.vehicle.type,
@@ -493,6 +494,7 @@ export class AdminService {
       documents: {
         nationalIdUrl: d.nationalIdUrl,
         driverLicenseUrl: d.driverLicenseUrl,
+        policeClearanceUrl: d.policeClearanceUrl,
       },
     }));
   }

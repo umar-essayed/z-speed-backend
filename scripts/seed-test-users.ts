@@ -27,6 +27,11 @@ async function main() {
       role: Role.DRIVER,
     },
     {
+      email: 'testdriver@zspeed.com',
+      name: 'Demo Test Driver',
+      role: Role.DRIVER,
+    },
+    {
       email: 'customer@zspeed.app',
       name: 'Z-SPEED Customer',
       role: Role.CUSTOMER,

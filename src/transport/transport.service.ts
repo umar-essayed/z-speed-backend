@@ -74,6 +74,73 @@ export class TransportService {
     return { id: doc.id, ...data };
   }
 
+  private async runTestDriverSimulation(rideId: string, rideData: any) {
+    const db = this.firebase.getFirestore();
+    if (!db) return;
+
+    const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+    try {
+      // 1. After 3 seconds, simulate driver accepting the ride
+      await delay(3000);
+      console.log(`🤖 [Test Driver Bot] Auto-Accepting Ride ${rideId}`);
+      await this.updateRideGateway(rideId, {
+        status: 'accepted',
+        driverId: rideData.driverId,
+      });
+
+      // Get pickup and dropoff coords
+      const pLat = Number(rideData.pickupLocation?.latitude || 30.0444);
+      const pLng = Number(rideData.pickupLocation?.longitude || 31.2357);
+      const dLat = Number(rideData.dropoffLocation?.latitude || 30.0500);
+      const dLng = Number(rideData.dropoffLocation?.longitude || 31.2400);
+
+      // Start position (simulate driver starting slightly offset from pickup)
+      let currentLat = pLat + 0.003;
+      let currentLng = pLng + 0.003;
+
+      // 2. Simulate driver driving to pickup point (5 steps, 2 seconds each)
+      const pickupSteps = 5;
+      for (let i = 1; i <= pickupSteps; i++) {
+        await delay(2000);
+        const ratio = i / pickupSteps;
+        currentLat = currentLat + (pLat - currentLat) * ratio;
+        currentLng = currentLng + (pLng - currentLng) * ratio;
+        console.log(`🤖 [Test Driver Bot] Moving to pickup: ${currentLat}, ${currentLng}`);
+        await this.updateRideLocationGateway(rideId, currentLat, currentLng);
+      }
+
+      // 3. Arrive at pickup
+      await delay(2000);
+      console.log(`🤖 [Test Driver Bot] Arrived at pickup`);
+      await this.updateRideGateway(rideId, { status: 'arrived' });
+
+      // 4. Start the ride after 4 seconds
+      await delay(4000);
+      console.log(`🤖 [Test Driver Bot] Starting ride`);
+      await this.updateRideGateway(rideId, { status: 'started' });
+
+      // 5. Simulate driver driving to dropoff point (7 steps, 2 seconds each)
+      const dropoffSteps = 7;
+      for (let i = 1; i <= dropoffSteps; i++) {
+        await delay(2000);
+        const ratio = i / dropoffSteps;
+        currentLat = pLat + (dLat - pLat) * ratio;
+        currentLng = pLng + (dLng - pLng) * ratio;
+        console.log(`🤖 [Test Driver Bot] Moving to dropoff: ${currentLat}, ${currentLng}`);
+        await this.updateRideLocationGateway(rideId, currentLat, currentLng);
+      }
+
+      // 6. Arrive at destination
+      await delay(2000);
+      console.log(`🤖 [Test Driver Bot] Arrived at destination`);
+      await this.updateRideGateway(rideId, { status: 'arrivedAtDestination' });
+
+    } catch (err) {
+      console.error('Error in test driver simulation:', err.message);
+    }
+  }
+
   async createRideGateway(rideData: any) {
     const db = this.firebase.getFirestore();
     if (!db) throw new Error('Firestore not initialized');
@@ -112,6 +179,21 @@ export class TransportService {
       });
     } catch (err) {
       console.error('Failed to create SQL mirror for ride:', err.message);
+    }
+
+    // Exclusive simulation check for testdriver@zspeed.com
+    try {
+      if (rideData.driverId) {
+        const driverUser = await this.prisma.user.findFirst({
+          where: { firebaseUid: rideData.driverId }
+        });
+        if (driverUser && driverUser.email === 'testdriver@zspeed.com') {
+          console.log(`🤖 [Test Driver Bot] Triggering background simulation for testdriver@zspeed.com`);
+          this.runTestDriverSimulation(rideId, rideData);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to check and trigger test driver simulation:', err.message);
     }
 
     return { success: true, rideId };
@@ -215,8 +297,9 @@ export class TransportService {
     try {
       const sqlStatus = updates.status === 'pending' ? 'PENDING' :
                         updates.status === 'accepted' ? 'ACCEPTED' :
-                        updates.status === 'arrived' ? 'ARRIVED' :
+                        updates.status === 'arrived' ? 'ARRIVING' :
                         updates.status === 'started' ? 'STARTED' :
+                        updates.status === 'arrivedAtDestination' ? 'STARTED' :
                         updates.status === 'completed' ? 'COMPLETED' : 'CANCELLED';
 
       await this.prisma.ride.update({

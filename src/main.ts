@@ -22,26 +22,21 @@ async function bootstrap() {
   // CORS
   app.enableCors({
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-      if (!allowedOrigins || allowedOrigins === '*') {
+      if (!origin || !allowedOrigins || allowedOrigins === '*') {
         callback(null, true);
         return;
       }
       const origins = allowedOrigins.split(',').map((o) => o.trim().replace(/\/$/, ''));
-      if (!origin || origins.includes(origin.replace(/\/$/, ''))) {
+      const isLocal = origin.startsWith('http://localhost') || 
+                      origin.startsWith('http://127.0.0.1') || 
+                      origin.startsWith('http://192.168.');
+      if (isLocal || origins.includes(origin.replace(/\/$/, ''))) {
         callback(null, true);
       } else {
-        // Fallback for subdomains if needed, but for now strict match
         callback(null, false);
       }
     },
-    allowedHeaders: [
-      'content-type',
-      'authorization',
-      'idempotency-key',
-      'mfa-token',
-      'app-integrity',
-      'x-requested-with',
-    ],
+    allowedHeaders: '*',
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
   });

@@ -1,5 +1,6 @@
 import { PrismaClient, Role, AccountStatus } from '@prisma/client';
 import * as admin from 'firebase-admin';
+import { createClient } from '@supabase/supabase-js';
 import * as dotenv from 'dotenv';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -48,40 +49,71 @@ async function initFirebase() {
 async function main() {
   console.log('📚 Initializing Bookstore Seeding Script...');
   
-  await initFirebase();
-  const auth = admin.auth();
-
   const email = 'bookstore@zspeedapp.com';
   const password = 'ZSpeed@Bookstore55';
-  let firebaseUid = '';
+  let firebaseUid = 'bookstore-fb-auth-uid-mock';
+  let supabaseId = '';
 
-  // 1. Create/Retrieve Firebase Auth User
-  try {
-    const fbUser = await auth.getUserByEmail(email);
-    firebaseUid = fbUser.uid;
-    console.log(`ℹ️ Firebase Auth user already exists: ${email} (${firebaseUid})`);
-  } catch (err: any) {
-    if (err.code === 'auth/user-not-found') {
-      const newUser = await auth.createUser({
-        email,
-        password,
-        displayName: 'Z-SPEED Bookstore',
-        emailVerified: true,
-      });
-      firebaseUid = newUser.uid;
-      console.log(`✅ Created new Firebase Auth user: ${email} (${firebaseUid})`);
-    } else {
-      throw err;
-    }
+  // 2. Create/Retrieve Supabase Auth User
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error('SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables are missing!');
   }
 
-  // 2. Create/Retrieve User in PostgreSQL
+  const supabase = createClient(supabaseUrl, serviceRoleKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  });
+
+  try {
+    const { data: userList, error: listError } = await supabase.auth.admin.listUsers();
+    if (listError) throw listError;
+
+    const existingUser = userList?.users?.find(u => u.email?.toLowerCase() === email.toLowerCase());
+    if (existingUser) {
+      supabaseId = existingUser.id;
+      console.log(`ℹ️ Supabase Auth user already exists: ${email} (${supabaseId})`);
+
+      // Update password to be absolutely sure it is synchronized
+      const { error: updateError } = await supabase.auth.admin.updateUserById(supabaseId, {
+        password: password,
+        email_confirm: true,
+        user_metadata: { role: 'VENDOR', name: 'Z-SPEED Bookstore' }
+      });
+      if (updateError) {
+        console.warn(`Warning updating Supabase user details: ${updateError.message}`);
+      } else {
+        console.log(`✅ Updated password for Supabase Auth user successfully`);
+      }
+    } else {
+      const { data: newUser, error: createError } = await supabase.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: { role: 'VENDOR', name: 'Z-SPEED Bookstore' }
+      });
+      if (createError) throw createError;
+
+      supabaseId = newUser.user.id;
+      console.log(`✅ Created new Supabase Auth user: ${email} (${supabaseId})`);
+    }
+  } catch (err: any) {
+    console.error('❌ Supabase Auth provisioning failed:', err);
+    throw err;
+  }
+
+  // 3. Create/Retrieve User in PostgreSQL
   const dbUser = await prisma.user.upsert({
     where: { email },
     update: {
       role: Role.VENDOR,
       status: AccountStatus.ACTIVE,
       firebaseUid,
+      supabaseId,
     },
     create: {
       email,
@@ -89,6 +121,7 @@ async function main() {
       role: Role.VENDOR,
       status: AccountStatus.ACTIVE,
       firebaseUid,
+      supabaseId,
       authProvider: 'email',
       emailVerified: true,
     },

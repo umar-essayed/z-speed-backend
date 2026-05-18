@@ -866,7 +866,7 @@ export class AdminService {
       const user = await this.prisma.user.findUnique({ where: { id: data.userId } });
       if (user) {
         // Create restaurant in PostgreSQL
-        await this.prisma.restaurant.create({
+        const restaurant = await this.prisma.restaurant.create({
           data: {
             ownerId: data.userId,
             name: data.businessName || data.name || 'New Restaurant',
@@ -880,6 +880,53 @@ export class AdminService {
             payoutPhoneNumber: data.phone,
           },
         });
+
+        // Auto-create default sections/categories based on vendorType
+        const type = (data.vendorType || 'RESTAURANT').toLowerCase();
+        let defaultSections: { name: string; nameAr: string }[] = [];
+        if (type === 'bookstore') {
+          defaultSections = [
+            { name: 'School Supplies & Bags', nameAr: 'الأدوات المدرسية والشنط' },
+            { name: 'Pens & Writing Instruments', nameAr: 'الأقلام وأدوات الكتابة' },
+            { name: 'Books & Novels', nameAr: 'الكتب والروايات' },
+            { name: 'Educational Textbooks', nameAr: 'الكتب الخارجية والمذكرات' },
+            { name: 'Educational Toys & Aids', nameAr: 'الألعاب التعليمية والوسائل' },
+            { name: 'Office Equipment', nameAr: 'الأجهزة المكتبية والإلكترونيات' },
+            { name: 'Art & Engineering Supplies', nameAr: 'الأدوات الفنية والهندسة' },
+          ];
+        } else if (type === 'pharmacy') {
+          defaultSections = [
+            { name: 'Medicines', nameAr: 'الأدوية العلاجية' },
+            { name: 'Personal Care', nameAr: 'العناية الشخصية' },
+            { name: 'Cosmetics', nameAr: 'مستحضرات التجميل' },
+            { name: 'Baby Care', nameAr: 'العناية بالطفل' },
+            { name: 'Supplements', nameAr: 'المكملات الغذائية' },
+          ];
+        } else if (type === 'supermarket' || type === 'grocery') {
+          defaultSections = [
+            { name: 'Grocery & Food', nameAr: 'البقالة والأغذية' },
+            { name: 'Dairy & Cheese', nameAr: 'الألبان والأجبان' },
+            { name: 'Beverages & Juices', nameAr: 'المشروبات والعصائر' },
+            { name: 'Frozen Food', nameAr: 'المجمدات' },
+            { name: 'Household Care', nameAr: 'العناية بالمنزل' },
+          ];
+        }
+
+        if (defaultSections.length > 0) {
+          await Promise.all(
+            defaultSections.map((s, index) =>
+              this.prisma.menuSection.create({
+                data: {
+                  restaurantId: restaurant.id,
+                  name: s.name,
+                  nameAr: s.nameAr,
+                  isActive: true,
+                  sortOrder: index,
+                },
+              })
+            )
+          );
+        }
 
         // Update user role to VENDOR
         await this.prisma.user.update({

@@ -211,10 +211,11 @@ export class AuthService {
     }
 
     const tokens = this.generateTokens(user);
+    const customToken = await this.syncAndGetFirebaseToken(user);
 
     return {
       message: 'تم تسجيل الدخول بنجاح',
-      user: this.formatUser(user),
+      user: this.formatUser(user, customToken),
       ...tokens,
     };
   }
@@ -618,7 +619,8 @@ export class AuthService {
       include: { driverProfile: true },
     });
     if (!user) throw new NotFoundException('المستخدم غير موجود');
-    return { user: this.formatUser(user) };
+    const customToken = await this.syncAndGetFirebaseToken(user);
+    return { user: this.formatUser(user, customToken) };
   }
 
   async refreshToken(refreshTokenValue: string) {
@@ -637,8 +639,10 @@ export class AuthService {
       }
 
       const tokens = this.generateTokens(user);
+      const customToken = await this.syncAndGetFirebaseToken(user);
       return {
         message: 'تم تجديد الجلسة بنجاح',
+        user: this.formatUser(user, customToken),
         ...tokens,
       };
     } catch (error) {
@@ -762,7 +766,7 @@ export class AuthService {
   // HELPERS
   // ─────────────────────────────────────────────────────────────────────────────
 
-  private formatUser(user: any) {
+  private formatUser(user: any, firebaseCustomToken?: string) {
     return {
       id: user.id,
       email: user.email,
@@ -778,7 +782,45 @@ export class AuthService {
       authProvider: user.authProvider,
       applicationStatus: user.driverProfile?.applicationStatus?.toLowerCase(),
       rejectionReason: user.driverProfile?.rejectionReason,
+      firebaseCustomToken,
     };
+  }
+
+  private async syncAndGetFirebaseToken(user: any): Promise<string | undefined> {
+    if (user.role !== Role.VENDOR && user.role !== Role.DRIVER) return undefined;
+
+    try {
+      let fbUid = user.firebaseUid || user.id;
+
+      if (user.role === Role.VENDOR) {
+        const restaurant = await this.prisma.restaurant.findFirst({
+          where: { ownerId: user.id },
+          select: { firebaseId: true }
+        });
+        if (restaurant?.firebaseId) {
+          fbUid = restaurant.firebaseId;
+        }
+      }
+
+      const firestore = this.firebaseAdmin.getFirestore();
+      if (firestore) {
+        await firestore.collection('users').doc(fbUid).set({
+          type: user.role === Role.VENDOR ? 'restaurant' : 'driver',
+          email: user.email,
+          name: user.name || '',
+          role: user.role,
+          updatedAt: new Date()
+        }, { merge: true });
+      }
+
+      const auth = this.firebaseAdmin.getAuth();
+      if (auth) {
+        return await auth.createCustomToken(fbUid, { role: user.role });
+      }
+    } catch (err) {
+      this.logger.error(`Failed to generate custom token or sync user to firestore: ${err}`);
+    }
+    return undefined;
   }
 
   async updateFcmToken(userId: string, token: string, platform?: string) {

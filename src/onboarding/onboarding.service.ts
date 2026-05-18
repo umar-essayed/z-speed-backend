@@ -12,9 +12,15 @@ export class OnboardingService {
 
   async submitDriverApplication(userId: string, data: any) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user || user.role !== Role.DRIVER) {
-      throw new BadRequestException('User not found or not a driver');
+    if (!user) {
+      throw new BadRequestException('User not found');
     }
+
+    // Elevate user's role in database to DRIVER so they can have a DriverProfile and be verified
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { role: Role.DRIVER }
+    });
 
     return this.prisma.driverProfile.upsert({
       where: { userId },

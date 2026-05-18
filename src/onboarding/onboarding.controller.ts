@@ -11,7 +11,7 @@ export class OnboardingController {
 
   @Post('driver')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.DRIVER)
+  @Roles(Role.CUSTOMER, Role.DRIVER)
   async submitDriver(@Request() req: any, @Body() data: any) {
     return this.onboardingService.submitDriverApplication(req.user.userId, data);
   }

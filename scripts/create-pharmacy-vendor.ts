@@ -208,7 +208,7 @@ async function main() {
 
   // 4. Create Pharmacy Restaurant document in Firestore
   await db.collection('restaurants').doc(restaurantId).set({
-    ownerId: dbUser.id,
+    ownerId: dbUser.firebaseUid || firebaseUid,
     name: 'Z-SPEED Premium Pharmacy',
     nameAr: 'صيدلية زد سبيد الفاخرة',
     description: 'Your premium 24/7 destination for prescription medicine, dermatological skincare, infant wellness, and healthcare supplements.',

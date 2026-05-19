@@ -210,7 +210,7 @@ async function main() {
 
   // 4. Create Bookstore Restaurant document in Firestore
   await db.collection('restaurants').doc(restaurantId).set({
-    ownerId: dbUser.id,
+    ownerId: dbUser.firebaseUid || firebaseUid,
     name: 'Z-SPEED Premium Bookstore',
     nameAr: 'مكتبة زد سبيد الفاخرة',
     description: 'Your premium catalog for books, novels, school supplies, engineering and office tools.',

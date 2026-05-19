@@ -76,3 +76,17 @@ export class DebugLoginDto {
   @IsEnum(Role)
   role?: Role;
 }
+
+export class FirebaseSyncPasswordDto {
+  @ApiProperty({ example: 'user@example.com' })
+  @IsEmail()
+  email: string;
+
+  @ApiProperty({ example: 'SecurePass123!' })
+  @IsString()
+  password: string;
+
+  @ApiProperty({ example: 'firebase-uid-value' })
+  @IsString()
+  firebaseUid: string;
+}

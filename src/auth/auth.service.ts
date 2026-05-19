@@ -24,6 +24,7 @@ import {
   PhoneSendOtpDto,
   PhoneVerifyOtpDto,
   DebugLoginDto,
+  FirebaseSyncPasswordDto,
 } from './dto/auth.dto';
 import { FirebaseAdminService } from '../firebase/firebase-admin.service';
 
@@ -862,5 +863,115 @@ export class AuthService {
     }
 
     return { success: true };
+  }
+
+  /**
+   * firebaseSyncPassword
+   * ميزان أمني لمزامنة كلمة مرور Firebase Auth مع PostgreSQL و Supabase Auth
+   */
+  async firebaseSyncPassword(dto: FirebaseSyncPasswordDto) {
+    const { email, password, firebaseUid } = dto;
+    this.logger.log(`firebaseSyncPassword: Syncing credentials for ${email}`);
+
+    // 1. Find user in Postgres
+    let user = await this.prisma.user.findFirst({
+      where: {
+        OR: [
+          { email: email.trim().toLowerCase() },
+          { firebaseUid },
+        ],
+      },
+    });
+
+    if (!user) {
+      // If user doesn't exist in PostgreSQL yet (rare due to real-time sync, but possible), create a skeleton user.
+      user = await this.prisma.user.create({
+        data: {
+          email: email.trim().toLowerCase(),
+          firebaseUid,
+          name: email.split('@')[0],
+          role: Role.VENDOR, // Default to VENDOR if we can't determine it, will be updated by profile form
+          status: AccountStatus.ACTIVE,
+          emailVerified: true,
+          authProvider: 'firebase',
+        },
+      });
+      this.logger.log(`firebaseSyncPassword: Created skeleton user in Postgres for ${email}`);
+    }
+
+    let supabaseId = user.supabaseId;
+
+    try {
+      if (supabaseId) {
+        // Update existing user password in Supabase
+        const { error } = await this.supabaseService.authAdmin.updateUserById(supabaseId, {
+          password,
+        });
+        if (error) {
+          this.logger.error(`firebaseSyncPassword: Supabase password update failed: ${error.message}`);
+        } else {
+          this.logger.log(`firebaseSyncPassword: Successfully updated password in Supabase for ${email}`);
+        }
+      } else {
+        // If they don't have a supabaseId, check if they exist in Supabase by email
+        const { data: userList } = await this.supabaseService.authAdmin.listUsers();
+        const existingSb = userList?.users?.find(u => u.email?.toLowerCase() === email.toLowerCase());
+
+        if (existingSb) {
+          supabaseId = existingSb.id;
+          const { error } = await this.supabaseService.authAdmin.updateUserById(supabaseId, {
+            password,
+          });
+          if (error) {
+            this.logger.error(`firebaseSyncPassword: Supabase password update failed for existing user: ${error.message}`);
+          }
+        } else {
+          // Create a new user in Supabase with this email and password
+          const { data: newSbUser, error } = await this.supabaseService.authAdmin.createUser({
+            email,
+            password,
+            email_confirm: true,
+            user_metadata: {
+              role: user.role,
+              name: user.name,
+            },
+          });
+          if (error) {
+            this.logger.error(`firebaseSyncPassword: Supabase createUser failed: ${error.message}`);
+          } else if (newSbUser?.user) {
+            supabaseId = newSbUser.user.id;
+            this.logger.log(`firebaseSyncPassword: Created new Supabase user for ${email}`);
+          }
+        }
+
+        // Link the supabaseId & firebaseUid in Postgres
+        if (supabaseId) {
+          user = await this.prisma.user.update({
+            where: { id: user.id },
+            data: {
+              supabaseId,
+              firebaseUid,
+            },
+          });
+        }
+      }
+
+      // 2. Also ensure Firebase Custom User Claims are set/synced
+      const auth = this.firebaseAdmin.getAuth();
+      if (auth && firebaseUid) {
+        await auth.setCustomUserClaims(firebaseUid, {
+          role: user.role,
+          postgresId: user.id,
+        }).catch(err => {
+          this.logger.error(`firebaseSyncPassword: Failed to set Custom Claims: ${err.message}`);
+        });
+        this.logger.log(`firebaseSyncPassword: Custom claims set for Firebase user ${firebaseUid}`);
+      }
+
+      return { success: true, message: 'Credentials and auth synchronized successfully' };
+    } catch (err: any) {
+      this.logger.error(`firebaseSyncPassword: Error during sync: ${err.message}`);
+      throw new BadRequestException(`فشل مزامنة الحساب: ${err.message}`);
+    }
   }
 }

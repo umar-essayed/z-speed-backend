@@ -910,6 +910,17 @@ export class AdminService {
             { name: 'Frozen Food', nameAr: 'المجمدات' },
             { name: 'Household Care', nameAr: 'العناية بالمنزل' },
           ];
+        } else if (type === 'home_furnishing' || type === 'homefurnishing') {
+          defaultSections = [
+            { name: 'Bedding & Mattress Covers', nameAr: 'المفروشات وأغطية المراتب' },
+            { name: 'Pillows & Cushions', nameAr: 'الوسائد والخداديات' },
+            { name: 'Blankets & Quilts', nameAr: 'البطاطين والألحفة' },
+            { name: 'Curtains & Decor', nameAr: 'الستائر والديكور' },
+            { name: 'Bean Bags & Puffs', nameAr: 'البين باجز والمساند' },
+            { name: 'Camping & Outdoor', nameAr: 'منتجات الكامبينج والرحلات' },
+            { name: 'Prayer Mats & Spiritual', nameAr: 'سجاد الصلاة والروحانيات' },
+            { name: 'Pets Beds & Accessories', nameAr: 'أسرة ومستلزمات الأليفة' },
+          ];
         }
 
         if (defaultSections.length > 0) {
@@ -1637,5 +1648,380 @@ export class AdminService {
 
     // Check for restaurants that might be offline during peak hours (example)
     // (This is just a placeholder for more complex logic)
+  }
+
+  // =============================================
+  // FINANCIAL AUDITING & REVIEW SUITE
+  // =============================================
+
+  async getFinancialTransactions(filters: {
+    type?: LedgerType;
+    status?: string;
+    search?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const page = Number(filters.page || 1);
+    const limit = Number(filters.limit || 50);
+    const skip = (page - 1) * limit;
+
+    const where: any = {};
+    if (filters.type) {
+      where.type = filters.type;
+    }
+    if (filters.status) {
+      where.status = filters.status;
+    }
+    if (filters.search) {
+      where.OR = [
+        { id: { contains: filters.search, mode: 'insensitive' } },
+        { description: { contains: filters.search, mode: 'insensitive' } },
+        { referenceId: { contains: filters.search, mode: 'insensitive' } },
+        { user: { name: { contains: filters.search, mode: 'insensitive' } } },
+        { user: { email: { contains: filters.search, mode: 'insensitive' } } },
+      ];
+    }
+
+    const [transactions, total] = await Promise.all([
+      this.prisma.ledger.findMany({
+        where,
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              role: true,
+              walletBalance: true,
+            },
+          },
+          order: {
+            select: {
+              id: true,
+              status: true,
+              total: true,
+              paymentMethod: true,
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.ledger.count({ where }),
+    ]);
+
+    // Audit and verify cryptographic signatures in real-time
+    const auditedTransactions = transactions.map((t) => {
+      let isSignatureValid = false;
+      try {
+        isSignatureValid = SignatureUtil.verifyLedgerEntry(
+          {
+            userId: t.userId,
+            type: t.type,
+            amount: t.amount,
+          } as any,
+          t.signature || '',
+        );
+      } catch (err) {
+        this.logger.error(`Error verifying signature for ledger ${t.id}: ${err.message}`);
+      }
+
+      return {
+        ...t,
+        isSignatureValid,
+      };
+    });
+
+    return {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+      transactions: auditedTransactions,
+    };
+  }
+
+  async reviewLedgerTransaction(
+    ledgerId: string,
+    adminId: string,
+    status: string,
+    notes?: string,
+  ) {
+    if (!['completed', 'rejected', 'flagged'].includes(status)) {
+      throw new BadRequestException('Invalid target review status. Must be completed, rejected, or flagged.');
+    }
+
+    const ledger = await this.prisma.ledger.findUnique({
+      where: { id: ledgerId },
+      include: { user: true },
+    });
+
+    if (!ledger) {
+      throw new NotFoundException('Transaction ledger entry not found.');
+    }
+
+    const currentMetadata = (ledger.metadata as Record<string, any>) || {};
+    const updatedMetadata = {
+      ...currentMetadata,
+      reviewedBy: adminId,
+      reviewedAt: new Date().toISOString(),
+      notes: notes || 'Reviewed by Administrator',
+      previousStatus: ledger.status,
+    };
+
+    // Calculate balance adjustments if status is transitioning
+    const statusTransition = `${ledger.status}->${status}`;
+
+    await this.prisma.$transaction(async (tx) => {
+      // 1. If transitioning from pending to completed (approved earning/deposit)
+      if (statusTransition === 'pending->completed') {
+        await tx.user.update({
+          where: { id: ledger.userId },
+          data: { walletBalance: { increment: ledger.amount } },
+        });
+
+        // If user is a VENDOR, update Restaurant's wallet balance
+        if (ledger.user.role === Role.VENDOR) {
+          const restaurant = await tx.restaurant.findFirst({
+            where: { ownerId: ledger.userId },
+          });
+          if (restaurant) {
+            await tx.restaurant.update({
+              where: { id: restaurant.id },
+              data: { walletBalance: { increment: ledger.amount } },
+            });
+          }
+        }
+      }
+      // 2. If transitioning from completed to rejected (rollback approved entry)
+      else if (statusTransition === 'completed->rejected') {
+        await tx.user.update({
+          where: { id: ledger.userId },
+          data: { walletBalance: { decrement: ledger.amount } },
+        });
+
+        if (ledger.user.role === Role.VENDOR) {
+          const restaurant = await tx.restaurant.findFirst({
+            where: { ownerId: ledger.userId },
+          });
+          if (restaurant) {
+            await tx.restaurant.update({
+              where: { id: restaurant.id },
+              data: { walletBalance: { decrement: ledger.amount } },
+            });
+          }
+        }
+      }
+
+      // Generate new secure cryptographic signature based on new status and metadata
+      const newSignature = SignatureUtil.signLedgerEntry({
+        userId: ledger.userId,
+        type: ledger.type,
+        amount: ledger.amount,
+      } as any);
+
+      // 3. Update the Ledger entry
+      await tx.ledger.update({
+        where: { id: ledgerId },
+        data: {
+          status,
+          metadata: updatedMetadata,
+          signature: newSignature,
+        },
+      });
+
+      // 4. Log this administrative action in audit logs
+      await tx.auditLog.create({
+        data: {
+          userId: adminId,
+          userRole: 'ADMIN',
+          action: 'MANUAL_FINANCIAL_AUDIT_REVIEW',
+          targetTable: 'ledgers',
+          targetId: ledgerId,
+          oldData: { status: ledger.status, metadata: ledger.metadata },
+          newData: { status, metadata: updatedMetadata },
+        },
+      });
+    });
+
+    // Sync to Firebase in background to ensure mobile app updates instantly
+    this.syncWalletBalanceToFirebase(ledger.userId);
+
+    return {
+      message: `Transaction ${ledgerId} successfully audited and status set to ${status}.`,
+      ledgerId,
+      newStatus: status,
+    };
+  }
+
+  async adjustWalletBalanceManually(
+    adminId: string,
+    dto: {
+      userId: string;
+      amount: number;
+      type: 'CREDIT' | 'DEBIT';
+      description: string;
+    },
+  ) {
+    const { userId, amount, type, description } = dto;
+    if (amount <= 0) {
+      throw new BadRequestException('Adjustment amount must be positive.');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+    if (!user) {
+      throw new NotFoundException('Target user not found.');
+    }
+
+    const ledgerAmount = type === 'CREDIT' ? amount : -amount;
+    const ledgerType = type === 'CREDIT' ? LedgerType.EARNING : LedgerType.FEE;
+    const referenceId = `manual_adj_${Date.now()}_${userId.slice(0, 5)}`;
+
+    const signature = SignatureUtil.signLedgerEntry({
+      userId,
+      type: ledgerType,
+      amount: ledgerAmount,
+    } as any);
+
+    const metadata = {
+      adjustedBy: adminId,
+      adjustedAt: new Date().toISOString(),
+      reason: description,
+      manualAdjustment: true,
+    };
+
+    await this.prisma.$transaction(async (tx) => {
+      // 1. Update active user wallet walletBalance
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          walletBalance:
+            type === 'CREDIT'
+              ? { increment: amount }
+              : { decrement: amount },
+        },
+      });
+
+      // Update restaurant model-level balance if vendor
+      if (user.role === Role.VENDOR) {
+        const restaurant = await tx.restaurant.findFirst({
+          where: { ownerId: userId },
+        });
+        if (restaurant) {
+          await tx.restaurant.update({
+            where: { id: restaurant.id },
+            data: {
+              walletBalance:
+                type === 'CREDIT'
+                  ? { increment: amount }
+                  : { decrement: amount },
+            },
+          });
+        }
+      }
+
+      // 2. Create signed ledger transaction entry
+      const newLedger = await tx.ledger.create({
+        data: {
+          userId,
+          type: ledgerType,
+          amount: ledgerAmount,
+          status: 'completed',
+          description,
+          referenceId,
+          signature,
+          metadata,
+        },
+      });
+
+      // 3. Log administrative audit log
+      await tx.auditLog.create({
+        data: {
+          userId: adminId,
+          userRole: 'ADMIN',
+          action: 'MANUAL_WALLET_BALANCE_ADJUSTMENT',
+          targetTable: 'users',
+          targetId: userId,
+          newData: {
+            adjustmentType: type,
+            adjustmentAmount: amount,
+            ledgerId: newLedger.id,
+            description,
+          },
+        },
+      });
+    });
+
+    // Sync to Firebase in background to ensure mobile app updates instantly
+    this.syncWalletBalanceToFirebase(userId);
+
+    return {
+      message: `Successfully adjusted balance by ${type === 'CREDIT' ? '+' : '-'}EGP ${amount.toFixed(2)}.`,
+      userId,
+      adjustmentType: type,
+      amount,
+    };
+  }
+
+  async syncWalletBalanceToFirebase(userId: string) {
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+        include: {
+          driverProfile: true,
+          ownedRestaurants: {
+            select: { id: true, firebaseId: true, walletBalance: true },
+          },
+        },
+      });
+
+      if (!user || !user.firebaseUid) return;
+
+      const db = this.firebase.getFirestore();
+      const updates: Promise<any>[] = [];
+
+      // 1. Update User Document in Firestore
+      updates.push(
+        db.collection('users').doc(user.firebaseUid).update({
+          walletBalance: user.walletBalance,
+        }).catch((err) => {
+          this.logger.error(`Error updating Firebase user wallet: ${err.message}`);
+        })
+      );
+
+      // 2. If user is a DRIVER, update DriverProfile Document in Firestore
+      if (user.driverProfile) {
+        updates.push(
+          db.collection('driverProfiles').doc(user.firebaseUid).update({
+            walletBalance: user.walletBalance,
+          }).catch((err) => {
+            this.logger.error(`Error updating Firebase driverProfile wallet: ${err.message}`);
+          })
+        );
+      }
+
+      // 3. If user is a VENDOR, update Restaurant Document in Firestore
+      if (user.ownedRestaurants && user.ownedRestaurants.length > 0) {
+        for (const restaurant of user.ownedRestaurants) {
+          if (restaurant.firebaseId) {
+            updates.push(
+              db.collection('restaurants').doc(restaurant.firebaseId).update({
+                walletBalance: restaurant.walletBalance,
+              }).catch((err) => {
+                this.logger.error(`Error updating Firebase restaurant wallet: ${err.message}`);
+              })
+            );
+          }
+        }
+      }
+
+      await Promise.all(updates);
+      this.logger.log(`Successfully synced wallet balance to Firebase for user ${userId}`);
+    } catch (error) {
+      this.logger.error(`Failed to sync wallet balance to Firebase for user ${userId}: ${error.message}`);
+    }
   }
 }

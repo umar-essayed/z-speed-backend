@@ -27,6 +27,7 @@ import {
   PhoneSendOtpDto,
   PhoneVerifyOtpDto,
   DebugLoginDto,
+  FirebaseSyncPasswordDto,
 } from './dto/auth.dto';
 
 @ApiTags('🔐 Authentication')
@@ -302,5 +303,18 @@ export class AuthController {
     @Res({ passthrough: true }) res: any,
   ) {
     return this.authService.debugLogin(req, dto, res);
+  }
+
+  /**
+   * POST /api/v1/auth/firebase-sync-password
+   * ميزان أمني لمزامنة كلمة مرور Firebase Auth مع PostgreSQL و Supabase Auth
+   */
+  @Post('firebase-sync-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Sync Firebase user password with Postgres & Supabase Auth' })
+  async firebaseSyncPassword(
+    @Body() dto: FirebaseSyncPasswordDto,
+  ) {
+    return this.authService.firebaseSyncPassword(dto);
   }
 }

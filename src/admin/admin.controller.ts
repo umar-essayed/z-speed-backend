@@ -16,7 +16,7 @@ import { AdminService } from './admin.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
-import { Role } from '@prisma/client';
+import { Role, LedgerType } from '@prisma/client';
 
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 
@@ -293,5 +293,38 @@ export class AdminController {
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename=${type}_export_${new Date().toISOString().split('T')[0]}.csv`);
     return res.send(csv);
+  }
+
+  // =============================================
+  // FINANCIAL AUDITING & REVIEW SUITE
+  // =============================================
+
+  @Get('financials/transactions')
+  async getFinancialTransactions(
+    @Query('type') type?: LedgerType,
+    @Query('status') status?: string,
+    @Query('search') search?: string,
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+  ) {
+    return this.adminService.getFinancialTransactions({ type, status, search, page, limit });
+  }
+
+  @Post('financials/transactions/:id/review')
+  async reviewTransaction(
+    @Param('id') id: string,
+    @Body('status') status: string,
+    @Body('notes') notes: string,
+    @CurrentUser() currentUser: any,
+  ) {
+    return this.adminService.reviewLedgerTransaction(id, currentUser.userId, status, notes);
+  }
+
+  @Post('financials/wallet/adjust')
+  async adjustWalletBalance(
+    @Body() dto: { userId: string; amount: number; type: 'CREDIT' | 'DEBIT'; description: string },
+    @CurrentUser() currentUser: any,
+  ) {
+    return this.adminService.adjustWalletBalanceManually(currentUser.userId, dto);
   }
 }

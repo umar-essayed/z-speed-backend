@@ -107,6 +107,15 @@ export class FirebaseSyncService implements OnModuleInit {
     else if (data.role === 'vendor' || data.role === 'VENDOR') role = Role.VENDOR;
     else if (data.role === 'driver' || data.role === 'DRIVER') role = Role.DRIVER;
 
+    let fcmTokens: string[] = [];
+    if (data.fcmTokens) {
+      if (Array.isArray(data.fcmTokens)) {
+        fcmTokens = data.fcmTokens.filter((t: any) => typeof t === 'string');
+      } else if (typeof data.fcmTokens === 'string') {
+        fcmTokens = [data.fcmTokens];
+      }
+    }
+
     try {
       // Find by email or firebaseUid
       const existingUser = await this.prisma.user.findFirst({
@@ -130,6 +139,7 @@ export class FirebaseSyncService implements OnModuleInit {
             emailVerified: true,
             authProvider: 'firebase',
             phone: data.phone || data.phoneNumber || null,
+            fcmTokens: fcmTokens.length > 0 ? fcmTokens : undefined,
           }
         });
       } else {
@@ -153,6 +163,7 @@ export class FirebaseSyncService implements OnModuleInit {
             role: (role === Role.ADMIN || (role as any) === 'SUPERADMIN') ? role : existingUser.role,
             name: existingUser.name || data.displayName || data.name,
             phone: existingUser.phone || data.phone || data.phoneNumber,
+            fcmTokens: fcmTokens.length > 0 ? fcmTokens : undefined,
           }
         });
       }

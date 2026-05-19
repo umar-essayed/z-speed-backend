@@ -6,6 +6,7 @@ import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { RequestLoggingInterceptor } from './common/interceptors/request-logging.interceptor';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { json, urlencoded } from 'express';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -15,6 +16,10 @@ async function bootstrap() {
   const configService = app.get(ConfigService);
   const port = configService.get<number>('PORT', 3000);
   const allowedOrigins = configService.get<string>('ALLOWED_ORIGINS', '');
+
+  // Increase payload size limit for high-resolution base64 prescription uploads
+  app.use(json({ limit: '50mb' }));
+  app.use(urlencoded({ limit: '50mb', extended: true }));
 
   // Security
   app.use(helmet());

@@ -23,8 +23,9 @@ export class UploadController {
         fileSize: 10 * 1024 * 1024, // 10 MB limit
       },
       fileFilter: (req, file, cb) => {
-        if (!file.mimetype.match(/^image\/(jpg|jpeg|png|gif|webp|heic|heif)$/) && 
-            file.mimetype !== 'application/pdf') {
+        const isAllowedMime = file.mimetype.match(/^image\/(jpg|jpeg|png|gif|webp|heic|heif)$/) || file.mimetype === 'application/pdf';
+        const isAllowedExtension = file.originalname.match(/\.(jpg|jpeg|png|gif|webp|heic|heif|pdf)$/i);
+        if (!isAllowedMime && !isAllowedExtension) {
           return cb(new BadRequestException('Only images and PDF files are allowed!'), false);
         }
         cb(null, true);
@@ -75,7 +76,9 @@ export class UploadController {
     FileInterceptor('file', {
       limits: { fileSize: 10 * 1024 * 1024 },
       fileFilter: (req, file, cb) => {
-        if (!file.mimetype.match(/^image\/(jpg|jpeg|png|gif|webp|heic|heif)$/) && file.mimetype !== 'application/pdf') {
+        const isAllowedMime = file.mimetype.match(/^image\/(jpg|jpeg|png|gif|webp|heic|heif)$/) || file.mimetype === 'application/pdf';
+        const isAllowedExtension = file.originalname.match(/\.(jpg|jpeg|png|gif|webp|heic|heif|pdf)$/i);
+        if (!isAllowedMime && !isAllowedExtension) {
           return cb(new BadRequestException('Only images and PDF files are allowed!'), false);
         }
         cb(null, true);

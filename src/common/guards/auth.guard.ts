@@ -72,11 +72,23 @@ export class AuthGuard implements CanActivate {
         try {
           const admin = require('firebase-admin');
           const decodedToken = await admin.auth().verifyIdToken(token);
+          
+          // Map Firebase UID to PostgreSQL database user ID to ensure correct owner permissions
+          const { PrismaClient } = require('@prisma/client');
+          const prismaTemp = new PrismaClient();
+          const dbUser = await prismaTemp.user.findFirst({
+            where: { firebaseUid: decodedToken.uid }
+          });
+          await prismaTemp.$disconnect();
+
+          const mappedUserId = dbUser ? dbUser.id : decodedToken.uid;
+          const mappedRole = dbUser ? dbUser.role : (decodedToken.role || 'VENDOR');
+
           request.user = {
-            dbUserId: decodedToken.uid,
-            userId: decodedToken.uid,
+            dbUserId: mappedUserId,
+            userId: mappedUserId,
             email: decodedToken.email,
-            role: decodedToken.role || 'CUSTOMER',
+            role: mappedRole,
           };
         } catch (firebaseErr) {
           throw new UnauthorizedException('جلسة غير صالحة أو منتهية الصلاحية');

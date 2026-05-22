@@ -490,11 +490,18 @@ export class AdminService {
         year: d.vehicle.year,
         color: d.vehicle.color,
         plateNumber: d.vehicle.plateNumber,
+        registrationDocUrl: d.vehicle.registrationDocUrl,
+        insuranceDocUrl: d.vehicle.insuranceDocUrl,
+        vehiclePhotoUrl: d.vehicle.vehiclePhotoUrl,
       } : null,
       documents: {
         nationalIdUrl: d.nationalIdUrl,
         driverLicenseUrl: d.driverLicenseUrl,
+        registrationDocUrl: d.vehicle?.registrationDocUrl || null,
+        insuranceDocUrl: d.vehicle?.insuranceDocUrl || null,
         policeClearanceUrl: d.policeClearanceUrl,
+        facePhotoUrl: d.facePhotoUrl,
+        vehiclePhotoUrl: d.vehicle?.vehiclePhotoUrl || null,
       },
     }));
   }
@@ -1062,6 +1069,29 @@ export class AdminService {
       const canTransport = category === 'transport';
       const canDeliver = !canTransport;
 
+      // Extract nationalId and dateOfBirth
+      const nationalId = personalInfo.nationalId || data.nationalId || null;
+      let dateOfBirth: Date | null = null;
+      const dobStr = personalInfo.dateOfBirth || personalInfo.dob || data.dateOfBirth || data.dob;
+      if (dobStr) {
+        const parsed = new Date(dobStr);
+        if (!isNaN(parsed.getTime())) {
+          dateOfBirth = parsed;
+        }
+      }
+
+      // Extract document URLs with robust map/list fallbacks
+      const docs = data.documents || {};
+      const docUrlsList = data.documentUrls || data.rawData?.documentUrls || [];
+
+      const nationalIdUrl = docs.nationalIdUrl || docUrlsList[0] || null;
+      const driverLicenseUrl = docs.driverLicenseUrl || docUrlsList[1] || null;
+      const registrationDocUrl = docs.registrationDocUrl || docUrlsList[2] || null;
+      const insuranceDocUrl = docs.insuranceDocUrl || docUrlsList[3] || null;
+      const policeClearanceUrl = docs.policeClearanceUrl || docUrlsList[4] || null;
+      const facePhotoUrl = docs.facePhotoUrl || docUrlsList[5] || null;
+      const vehiclePhotoUrl = docs.vehiclePhotoUrl || docUrlsList[6] || null;
+
       const user = await this.prisma.user.findUnique({ where: { id: data.userId } });
       if (user) {
         const profile = await this.prisma.driverProfile.upsert({
@@ -1071,6 +1101,12 @@ export class AdminService {
             isAvailable: true,
             canDeliver,
             canTransport,
+            nationalId,
+            nationalIdUrl,
+            driverLicenseUrl,
+            policeClearanceUrl,
+            facePhotoUrl,
+            dateOfBirth,
           },
           create: { 
             userId: data.userId, 
@@ -1078,12 +1114,30 @@ export class AdminService {
             isAvailable: true,
             canDeliver,
             canTransport,
+            nationalId,
+            nationalIdUrl,
+            driverLicenseUrl,
+            policeClearanceUrl,
+            facePhotoUrl,
+            dateOfBirth,
           }
         });
 
         if (data.vehicle) {
-          await this.prisma.vehicle.create({
-            data: {
+          await this.prisma.vehicle.upsert({
+            where: { driverProfileId: profile.id },
+            update: {
+              type: data.vehicle.type || 'BIKE',
+              make: data.vehicle.make || 'Unknown',
+              model: data.vehicle.model || 'Unknown',
+              year: Number(data.vehicle.year) || 2024,
+              color: data.vehicle.color || 'Unknown',
+              plateNumber: data.vehicle.plateNumber || 'Unknown',
+              registrationDocUrl,
+              insuranceDocUrl,
+              vehiclePhotoUrl,
+            },
+            create: {
               driverProfileId: profile.id,
               type: data.vehicle.type || 'BIKE',
               make: data.vehicle.make || 'Unknown',
@@ -1091,8 +1145,13 @@ export class AdminService {
               year: Number(data.vehicle.year) || 2024,
               color: data.vehicle.color || 'Unknown',
               plateNumber: data.vehicle.plateNumber || 'Unknown',
+              registrationDocUrl,
+              insuranceDocUrl,
+              vehiclePhotoUrl,
             }
-          }).catch(() => {});
+          }).catch((err) => {
+            this.logger.error(`Failed to create/update vehicle in Postgres: ${err.message}`);
+          });
         }
 
         await this.prisma.user.update({ where: { id: data.userId }, data: { role: Role.DRIVER } });

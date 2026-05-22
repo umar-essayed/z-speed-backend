@@ -791,16 +791,67 @@ export class AuthService {
     if (user.role !== Role.VENDOR && user.role !== Role.DRIVER) return undefined;
 
     try {
-      let fbUid = user.firebaseUid || user.id;
+      let fbUid = user.firebaseUid;
+      let shouldUpdateDb = false;
 
+      // 1. Resolve firebaseUid using Firebase Auth by email as a fallback if not set in DB
+      const auth = this.firebaseAdmin.getAuth();
+      if (!fbUid && auth) {
+        try {
+          const fbUser = await auth.getUserByEmail(user.email);
+          if (fbUser?.uid) {
+            fbUid = fbUser.uid;
+            shouldUpdateDb = true;
+            this.logger.log(`Resolved firebaseUid by email ${user.email} from Firebase Auth: ${fbUid}`);
+          }
+        } catch (err: any) {
+          if (err.code !== 'auth/user-not-found') {
+            this.logger.error(`Error querying Firebase Auth by email ${user.email}: ${err.message}`);
+          }
+        }
+      }
+
+      // If still no firebaseUid could be resolved, fall back to user.id
+      if (!fbUid) {
+        fbUid = user.id;
+        shouldUpdateDb = true;
+      }
+
+      // 2. Vendor specific synchronization between User and Restaurant
       if (user.role === Role.VENDOR) {
         const restaurant = await this.prisma.restaurant.findFirst({
           where: { ownerId: user.id },
-          select: { firebaseId: true }
+          select: { id: true, firebaseId: true }
         });
-        if (restaurant?.firebaseId) {
-          fbUid = restaurant.firebaseId;
+
+        if (restaurant) {
+          if (restaurant.firebaseId && restaurant.firebaseId !== fbUid) {
+            // Mismatch: restaurant firebaseId takes precedence
+            fbUid = restaurant.firebaseId;
+            shouldUpdateDb = true;
+          } else if (!restaurant.firebaseId && fbUid) {
+            // Restaurant has no firebaseId, but user has fbUid. Let's sync restaurant.firebaseId to fbUid
+            await this.prisma.restaurant.update({
+              where: { id: restaurant.id },
+              data: { firebaseId: fbUid }
+            }).catch(err => {
+              this.logger.error(`Failed to auto-align restaurant.firebaseId in DB: ${err.message}`);
+            });
+            this.logger.log(`Auto-aligned restaurant.firebaseId in DB to match user firebaseUid: ${fbUid}`);
+          }
         }
+      }
+
+      // 3. Update PostgreSQL User if fbUid is newly set or mismatched
+      if (shouldUpdateDb || user.firebaseUid !== fbUid) {
+        await this.prisma.user.update({
+          where: { id: user.id },
+          data: { firebaseUid: fbUid }
+        }).catch(err => {
+          this.logger.error(`Failed to auto-align user.firebaseUid in DB: ${err.message}`);
+        });
+        user.firebaseUid = fbUid;
+        this.logger.log(`Auto-aligned and synchronized user.firebaseUid in PostgreSQL: ${fbUid}`);
       }
 
       const firestore = this.firebaseAdmin.getFirestore();
@@ -814,7 +865,6 @@ export class AuthService {
         }, { merge: true });
       }
 
-      const auth = this.firebaseAdmin.getAuth();
       if (auth) {
         return await auth.createCustomToken(fbUid, { role: user.role });
       }
@@ -914,12 +964,12 @@ export class AuthService {
         }
       } else {
         // If they don't have a supabaseId, check if they exist in Supabase by email
-        const { data: userList } = await this.supabaseService.authAdmin.listUsers();
-        const existingSb = userList?.users?.find(u => u.email?.toLowerCase() === email.toLowerCase());
+        const { data: userList } = await this.supabaseService.authAdmin.listUsers() as any;
+        const existingSb = (userList?.users as any[])?.find(u => u.email?.toLowerCase() === email.toLowerCase());
 
         if (existingSb) {
           supabaseId = existingSb.id;
-          const { error } = await this.supabaseService.authAdmin.updateUserById(supabaseId, {
+          const { error } = await this.supabaseService.authAdmin.updateUserById(supabaseId as string, {
             password,
           });
           if (error) {

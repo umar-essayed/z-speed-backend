@@ -868,6 +868,15 @@ export class AdminService {
       approvedAt: new Date(),
     });
 
+    try {
+      await db.collection('applications').doc(applicationId).update({
+        status: 'approved',
+        approvedAt: new Date(),
+      });
+    } catch (err) {
+      this.logger.warn(`Could not update general applications collection for ${applicationId}: ${err.message}`);
+    }
+
     // 2. If user exists in PostgreSQL, create restaurant & update role
     if (data.userId) {
       const user = await this.prisma.user.findUnique({ where: { id: data.userId } });
@@ -985,6 +994,16 @@ export class AdminService {
       rejectedAt: new Date(),
     });
 
+    try {
+      await db.collection('applications').doc(applicationId).update({
+        status: 'rejected',
+        rejectionReason: reason || 'Application did not meet requirements',
+        rejectedAt: new Date(),
+      });
+    } catch (err) {
+      this.logger.warn(`Could not update general applications collection for ${applicationId}: ${err.message}`);
+    }
+
     if (data.userId) {
       try {
         await this.notifications.createNotification(
@@ -1061,6 +1080,15 @@ export class AdminService {
     const data = doc.data() as any;
 
     await docRef.update({ status: 'approved', approvedAt: new Date() });
+
+    try {
+      await db.collection('applications').doc(applicationId).update({
+        status: 'approved',
+        approvedAt: new Date(),
+      });
+    } catch (err) {
+      this.logger.warn(`Could not update general applications collection for ${applicationId}: ${err.message}`);
+    }
 
     if (data.userId) {
       const personalInfo = data.personal || data.formData?.personalInfo || data.rawData?.formData?.personalInfo || {};
@@ -1190,6 +1218,16 @@ export class AdminService {
       rejectionReason: reason || 'Requirements not met',
       rejectedAt: new Date(),
     });
+
+    try {
+      await db.collection('applications').doc(applicationId).update({
+        status: 'rejected',
+        rejectionReason: reason || 'Requirements not met',
+        rejectedAt: new Date(),
+      });
+    } catch (err) {
+      this.logger.warn(`Could not update general applications collection for ${applicationId}: ${err.message}`);
+    }
 
     return { message: 'Driver application rejected' };
   }

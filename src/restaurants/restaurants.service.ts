@@ -378,11 +378,12 @@ export class RestaurantsService {
    */
   async update(id: string, ownerId: string, dto: UpdateRestaurantDto) {
     const restaurant = await this.verifyOwnership(id, ownerId);
-
-    return this.prisma.restaurant.update({
+    const updated = await this.prisma.restaurant.update({
       where: { id: restaurant.id },
       data: dto,
     });
+    await this.syncToFirebase(restaurant.id);
+    return updated;
   }
 
   /**
@@ -395,7 +396,7 @@ export class RestaurantsService {
   ) {
     await this.verifyOwnership(id, ownerId);
 
-    return this.prisma.restaurant.update({
+    const updated = await this.prisma.restaurant.update({
       where: { id },
       data: {
         deliveryRadiusKm: dto.deliveryRadiusKm,
@@ -410,6 +411,8 @@ export class RestaurantsService {
         serviceFeeValue: dto.serviceFeeValue,
       },
     });
+    await this.syncToFirebase(id);
+    return updated;
   }
 
   /**
@@ -417,11 +420,12 @@ export class RestaurantsService {
    */
   async toggleOpen(id: string, ownerId: string, isOpen: boolean) {
     await this.verifyOwnership(id, ownerId);
-
-    return this.prisma.restaurant.update({
+    const updated = await this.prisma.restaurant.update({
       where: { id },
       data: { isOpen },
     });
+    await this.syncToFirebase(id);
+    return updated;
   }
 
   /**
@@ -433,10 +437,12 @@ export class RestaurantsService {
     });
     if (!restaurant) throw new NotFoundException('Restaurant not found');
 
-    return this.prisma.restaurant.update({
+    const updated = await this.prisma.restaurant.update({
       where: { id },
       data: { status: AccountStatus.ACTIVE, isActive: true },
     });
+    await this.syncToFirebase(id);
+    return updated;
   }
 
   /**
@@ -448,10 +454,12 @@ export class RestaurantsService {
     });
     if (!restaurant) throw new NotFoundException('Restaurant not found');
 
-    return this.prisma.restaurant.update({
+    const updated = await this.prisma.restaurant.update({
       where: { id },
       data: { status: AccountStatus.INACTIVE, isActive: false },
     });
+    await this.syncToFirebase(id);
+    return updated;
   }
 
   /**
@@ -693,5 +701,59 @@ export class RestaurantsService {
     }
 
     return restaurant;
+  }
+
+  /**
+   * Synchronize restaurant details from PostgreSQL to Firebase Firestore.
+   */
+  private async syncToFirebase(restaurantId: string) {
+    try {
+      const restaurant = await this.prisma.restaurant.findUnique({
+        where: { id: restaurantId },
+      });
+      if (!restaurant) return;
+
+      const firestore = this.firebaseAdmin.getFirestore();
+      if (firestore) {
+        const docId = restaurant.firebaseId || restaurant.id;
+        
+        const syncData: any = {
+          name: restaurant.name,
+          nameAr: restaurant.nameAr || null,
+          description: restaurant.description || null,
+          logoUrl: restaurant.logoUrl || null,
+          coverImageUrl: restaurant.coverImageUrl || null,
+          isActive: restaurant.isActive,
+          isOpen: restaurant.isOpen,
+          vendorType: restaurant.vendorType || 'RESTAURANT',
+          address: restaurant.address || null,
+          city: restaurant.city || null,
+          latitude: restaurant.latitude || null,
+          longitude: restaurant.longitude || null,
+          
+          // Delivery Settings
+          deliveryRadiusKm: restaurant.deliveryRadiusKm || null,
+          deliveryTimeMin: restaurant.deliveryTimeMin || null,
+          deliveryTimeMax: restaurant.deliveryTimeMax || null,
+          deliveryFeeMode: restaurant.deliveryFeeMode || null,
+          deliveryFee: restaurant.deliveryFee || 0.0,
+          minimumOrder: restaurant.minimumOrder || 0.0,
+          
+          updatedAt: new Date(),
+        };
+
+        if (restaurant.deliveryFeeTiers) {
+          syncData.deliveryFeeTiers = restaurant.deliveryFeeTiers;
+        }
+        if (restaurant.deliveryFeeFormula) {
+          syncData.deliveryFeeFormula = restaurant.deliveryFeeFormula;
+        }
+
+        await firestore.collection('restaurants').doc(docId).set(syncData, { merge: true });
+        this.logger.log(`Synced restaurant ${restaurantId} to Firestore document ${docId}`);
+      }
+    } catch (err) {
+      this.logger.error(`Failed to sync restaurant ${restaurantId} to Firebase: ${err.message}`);
+    }
   }
 }

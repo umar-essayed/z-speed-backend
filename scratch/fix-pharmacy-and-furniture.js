@@ -330,6 +330,27 @@ async function main() {
   // 3. SEED PRODUCTS & VARIANTS
   // =============================================
   console.log('\n--- Seeding Pharmacy active menu with Variants ---');
+
+  // Pre-cleanup Pharmacy Menu Sections & Items
+  console.log('Cleaning all existing pharmacy sections and items to avoid duplicates...');
+  const existingPhSecs = await prisma.menuSection.findMany({ where: { restaurantId: 'ef6a8ac3-b836-4857-af1c-b707326f4a16' } });
+  for (const s of existingPhSecs) {
+    await prisma.foodItemVariant.deleteMany({ where: { foodItem: { sectionId: s.id } } });
+    await prisma.foodItem.deleteMany({ where: { sectionId: s.id } });
+  }
+  await prisma.menuSection.deleteMany({ where: { restaurantId: 'ef6a8ac3-b836-4857-af1c-b707326f4a16' } });
+
+  // Delete from Firestore sections
+  const fsPhSections = await fsLegitPhRef.collection('sections').get();
+  for (const doc of fsPhSections.docs) {
+    const fsPhItems = await doc.ref.collection('items').get();
+    for (const itemDoc of fsPhItems.docs) {
+      await itemDoc.ref.delete();
+    }
+    await doc.ref.delete();
+  }
+  console.log('✅ Cleaned existing pharmacy menu items');
+
   const pharmaSecId = 'pharmacy-sec-1';
 
   // Postgres MenuSection
@@ -409,6 +430,27 @@ async function main() {
   });
 
   console.log('\n--- Seeding Furniture active menu with Variants ---');
+
+  // Pre-cleanup Furniture Menu Sections & Items
+  console.log('Cleaning all existing furniture sections and items to avoid duplicates...');
+  const existingFuSecs = await prisma.menuSection.findMany({ where: { restaurantId: 'furniture-test-restaurant-id' } });
+  for (const s of existingFuSecs) {
+    await prisma.foodItemVariant.deleteMany({ where: { foodItem: { sectionId: s.id } } });
+    await prisma.foodItem.deleteMany({ where: { sectionId: s.id } });
+  }
+  await prisma.menuSection.deleteMany({ where: { restaurantId: 'furniture-test-restaurant-id' } });
+
+  // Delete from Firestore sections
+  const fsFuSections = await fsLegitFuRef.collection('sections').get();
+  for (const doc of fsFuSections.docs) {
+    const fsFuItems = await doc.ref.collection('items').get();
+    for (const itemDoc of fsFuItems.docs) {
+      await itemDoc.ref.delete();
+    }
+    await doc.ref.delete();
+  }
+  console.log('✅ Cleaned existing furniture menu items');
+
   const furnSecId = 'furniture-sec-1';
   // Postgres Section
   await prisma.menuSection.upsert({

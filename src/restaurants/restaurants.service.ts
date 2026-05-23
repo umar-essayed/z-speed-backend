@@ -336,6 +336,7 @@ export class RestaurantsService {
             items: {
               where: { isAvailable: true },
               orderBy: { createdAt: 'desc' },
+              include: { variants: true },
             },
           },
         },
@@ -356,6 +357,7 @@ export class RestaurantsService {
       include: {
         items: {
           orderBy: { createdAt: 'desc' },
+          include: { variants: true },
         },
       },
     });
@@ -368,7 +370,7 @@ export class RestaurantsService {
     return this.prisma.restaurant.findMany({
       where: { ownerId },
       include: {
-        menuSections: { include: { items: true } },
+        menuSections: { include: { items: { include: { variants: true } } } },
       },
     });
   }

@@ -81,21 +81,80 @@ export class FoodService {
       throw new ForbiddenException('Not your restaurant');
     }
 
-    return this.prisma.foodItem.create({
+    const { variants, ...itemData } = dto;
+
+    const createdItem = await this.prisma.foodItem.create({
       data: {
-        sectionId: dto.sectionId,
-        name: dto.name,
-        nameAr: dto.nameAr,
-        price: dto.price,
-        description: dto.description,
-        descriptionAr: dto.descriptionAr,
-        imageUrl: dto.imageUrl,
-        originalPrice: dto.originalPrice,
-        isOnSale: dto.isOnSale ?? false,
-        prepTimeMin: dto.prepTimeMin ?? 10,
-        allergens: dto.allergens ?? [],
-        addons: dto.addons,
+        sectionId: itemData.sectionId,
+        name: itemData.name,
+        nameAr: itemData.nameAr,
+        price: itemData.price,
+        description: itemData.description,
+        descriptionAr: itemData.descriptionAr,
+        imageUrl: itemData.imageUrl,
+        originalPrice: itemData.originalPrice,
+        isOnSale: itemData.isOnSale ?? false,
+        prepTimeMin: itemData.prepTimeMin ?? 10,
+        allergens: itemData.allergens ?? [],
+        addons: itemData.addons,
+        hasFractions: itemData.hasFractions ?? false,
+        fractionUnitName: itemData.fractionUnitName,
+        fractionUnitNameAr: itemData.fractionUnitNameAr,
+        unitsPerParent: itemData.unitsPerParent,
+        fractionPrice: itemData.fractionPrice,
       },
+    });
+
+    if (createdItem.hasFractions && createdItem.unitsPerParent) {
+      const units = createdItem.unitsPerParent;
+      const calculatedStripPrice = createdItem.fractionPrice || Number((createdItem.price / units).toFixed(2));
+      
+      const boxName = 'Box';
+      const boxNameAr = 'علبة كاملة';
+      const stripName = createdItem.fractionUnitName || 'Strip';
+      const stripNameAr = createdItem.fractionUnitNameAr || 'شريط';
+
+      await this.prisma.foodItemVariant.createMany({
+        data: [
+          {
+            foodItemId: createdItem.id,
+            name: boxName,
+            nameAr: boxNameAr,
+            price: createdItem.price,
+            originalPrice: createdItem.originalPrice,
+            stockQuantity: createdItem.stockQuantity,
+            isFraction: false,
+            fractionMultiplier: units,
+          },
+          {
+            foodItemId: createdItem.id,
+            name: stripName,
+            nameAr: stripNameAr,
+            price: calculatedStripPrice,
+            isFraction: true,
+            fractionMultiplier: 1,
+          }
+        ],
+      });
+    } else if (variants && variants.length > 0) {
+      await this.prisma.foodItemVariant.createMany({
+        data: variants.map((v: any) => ({
+          foodItemId: createdItem.id,
+          name: v.name,
+          nameAr: v.nameAr,
+          price: Number(v.price),
+          originalPrice: v.originalPrice ? Number(v.originalPrice) : null,
+          stockQuantity: v.stockQuantity ? Number(v.stockQuantity) : 0,
+          isAvailable: v.isAvailable ?? true,
+          isFraction: v.isFraction ?? false,
+          fractionMultiplier: v.fractionMultiplier ? Number(v.fractionMultiplier) : null,
+        })),
+      });
+    }
+
+    return this.prisma.foodItem.findUnique({
+      where: { id: createdItem.id },
+      include: { variants: true },
     });
   }
 
@@ -113,21 +172,82 @@ export class FoodService {
       throw new ForbiddenException('Not your restaurant');
     }
 
-    return this.prisma.foodItem.update({
+    const { variants, ...itemData } = data;
+
+    const updatedItem = await this.prisma.foodItem.update({
       where: { id },
       data: {
-        name: data.name,
-        nameAr: data.nameAr,
-        price: data.price,
-        description: data.description,
-        descriptionAr: data.descriptionAr,
-        imageUrl: data.imageUrl,
-        originalPrice: data.originalPrice,
-        isOnSale: data.isOnSale,
-        prepTimeMin: data.prepTimeMin,
-        allergens: data.allergens,
-        addons: data.addons,
+        name: itemData.name,
+        nameAr: itemData.nameAr,
+        price: itemData.price,
+        description: itemData.description,
+        descriptionAr: itemData.descriptionAr,
+        imageUrl: itemData.imageUrl,
+        originalPrice: itemData.originalPrice,
+        isOnSale: itemData.isOnSale,
+        prepTimeMin: itemData.prepTimeMin,
+        allergens: itemData.allergens,
+        addons: itemData.addons,
+        hasFractions: itemData.hasFractions,
+        fractionUnitName: itemData.fractionUnitName,
+        fractionUnitNameAr: itemData.fractionUnitNameAr,
+        unitsPerParent: itemData.unitsPerParent,
+        fractionPrice: itemData.fractionPrice,
       },
+    });
+
+    if (variants) {
+      await this.prisma.foodItemVariant.deleteMany({ where: { foodItemId: id } });
+      if (variants.length > 0) {
+        await this.prisma.foodItemVariant.createMany({
+          data: variants.map((v: any) => ({
+            foodItemId: id,
+            name: v.name,
+            nameAr: v.nameAr,
+            price: Number(v.price),
+            originalPrice: v.originalPrice ? Number(v.originalPrice) : null,
+            stockQuantity: v.stockQuantity ? Number(v.stockQuantity) : 0,
+            isAvailable: v.isAvailable ?? true,
+            isFraction: v.isFraction ?? false,
+            fractionMultiplier: v.fractionMultiplier ? Number(v.fractionMultiplier) : null,
+          })),
+        });
+      }
+    } else if (itemData.hasFractions !== undefined || itemData.price !== undefined || itemData.unitsPerParent !== undefined) {
+      const freshItem = await this.prisma.foodItem.findUnique({ where: { id } });
+      if (freshItem?.hasFractions && freshItem.unitsPerParent) {
+        await this.prisma.foodItemVariant.deleteMany({ where: { foodItemId: id } });
+        const units = freshItem.unitsPerParent;
+        const calculatedStripPrice = freshItem.fractionPrice || Number((freshItem.price / units).toFixed(2));
+        
+        await this.prisma.foodItemVariant.createMany({
+          data: [
+            {
+              foodItemId: id,
+              name: 'Box',
+              nameAr: 'علبة كاملة',
+              price: freshItem.price,
+              originalPrice: freshItem.originalPrice,
+              stockQuantity: freshItem.stockQuantity,
+              isFraction: false,
+              fractionMultiplier: units,
+            },
+            {
+              foodItemId: id,
+              name: freshItem.fractionUnitName || 'Strip',
+              nameAr: freshItem.fractionUnitNameAr || 'شريط',
+              price: calculatedStripPrice,
+              isFraction: true,
+              fractionMultiplier: 1,
+            }
+          ],
+        });
+      }
+    }
+
+    return this.prisma.foodItem.findUnique({
+      where: { id },
+      include: { variants: true },
     });
   }
 
@@ -168,6 +288,7 @@ export class FoodService {
         items: {
           where: { isAvailable: true },
           orderBy: { createdAt: 'desc' },
+          include: { variants: true },
         },
       },
     });
@@ -206,6 +327,7 @@ export class FoodService {
     return this.prisma.foodItem.findMany({
       where,
       include: {
+        variants: true,
         section: {
           select: {
             id: true,

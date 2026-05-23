@@ -58,4 +58,30 @@ export class CreateFoodItemDto {
 
   @IsOptional()
   addons?: any;
+
+  // Fractional Fields
+  @IsBoolean()
+  @IsOptional()
+  hasFractions?: boolean;
+
+  @IsString()
+  @IsOptional()
+  fractionUnitName?: string;
+
+  @IsString()
+  @IsOptional()
+  fractionUnitNameAr?: string;
+
+  @IsInt()
+  @IsOptional()
+  unitsPerParent?: number;
+
+  @IsNumber()
+  @IsOptional()
+  fractionPrice?: number;
+
+  // Custom Variants
+  @IsArray()
+  @IsOptional()
+  variants?: any[];
 }

@@ -412,6 +412,13 @@ model FoodItem {
   isAvailable          Boolean @default(true)
   stockQuantity        Int     @default(0)
 
+  // Pharmacy / Supermarket Fractional Fields
+  hasFractions         Boolean           @default(false)
+  fractionUnitName     String?
+  fractionUnitNameAr   String?
+  unitsPerParent       Int?
+  fractionPrice        Float?
+
   addons      Json? // Structured addons (choices, extras)
   allergens   String[]
   prepTimeMin Int      @default(10)
@@ -422,11 +429,37 @@ model FoodItem {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  variants   FoodItemVariant[]
   cartItems  CartItem[]
   orderItems OrderItem[]
   favorites  Favorite[]
 
   @@map("food_items")
+}
+
+model FoodItemVariant {
+  id                 String    @id @default(uuid())
+  foodItemId         String
+  foodItem           FoodItem  @relation(fields: [foodItemId], references: [id], onDelete: Cascade)
+  
+  name               String    // E.g., "Small", "Medium", "Large" or "Box (علبة)", "Strip (شريط)"
+  nameAr             String?   // E.g., "صغير", "وسط", "كبير" or "علبة", "شريط"
+  price              Float     // Price of this variant
+  originalPrice      Float?    
+  stockQuantity      Int       @default(0) // Stock tracked per variant
+  isAvailable        Boolean   @default(true)
+  firebaseId         String?   @unique
+  
+  // Fractional Meta
+  isFraction         Boolean   @default(false)
+  fractionMultiplier Int?      // Number of fractional units this variant is worth
+
+  cartItems          CartItem[]
+  orderItems         OrderItem[]
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@map("food_item_variants")
 }
 
 model Cart {
@@ -447,6 +480,10 @@ model CartItem {
   cart       Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
   foodItemId String
   foodItem   FoodItem @relation(fields: [foodItemId], references: [id])
+
+  // Added variant relation
+  variantId  String?
+  variant    FoodItemVariant? @relation(fields: [variantId], references: [id])
 
   quantity       Int     @default(1)
   unitPrice      Float
@@ -656,6 +693,10 @@ model OrderItem {
   order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   foodItemId String
   foodItem   FoodItem @relation(fields: [foodItemId], references: [id])
+
+  // Added variant relation
+  variantId  String?
+  variant    FoodItemVariant? @relation(fields: [variantId], references: [id])
 
   quantity       Int
   unitPrice      Float

@@ -420,7 +420,18 @@ export class FirebaseSyncService implements OnModuleInit {
           isActive: data.isActive !== undefined ? data.isActive : true,
           isOpen: data.isOpen !== undefined ? data.isOpen : true,
           vendorType: data.vendorType || 'restaurant',
-          // Note: Add logic for address and geolocation if needed
+          address: data.address || null,
+          city: data.city || null,
+          latitude: data.latitude !== undefined ? parseFloat(data.latitude.toString()) : null,
+          longitude: data.longitude !== undefined ? parseFloat(data.longitude.toString()) : null,
+          deliveryRadiusKm: data.deliveryRadiusKm !== undefined ? parseFloat(data.deliveryRadiusKm.toString()) : null,
+          deliveryTimeMin: data.deliveryTimeMin !== undefined ? parseInt(data.deliveryTimeMin.toString()) : null,
+          deliveryTimeMax: data.deliveryTimeMax !== undefined ? parseInt(data.deliveryTimeMax.toString()) : null,
+          deliveryFeeMode: data.deliveryFeeMode || null,
+          deliveryFee: data.deliveryFee !== undefined ? parseFloat(data.deliveryFee.toString()) : 0.0,
+          minimumOrder: data.minimumOrder !== undefined ? parseFloat(data.minimumOrder.toString()) : 0.0,
+          deliveryFeeFormula: data.deliveryFeeFormula || null,
+          deliveryFeeTiers: data.deliveryFeeTiers || null,
         },
         create: {
           firebaseId: doc.id,
@@ -433,6 +444,18 @@ export class FirebaseSyncService implements OnModuleInit {
           isActive: data.isActive !== undefined ? data.isActive : true,
           isOpen: data.isOpen !== undefined ? data.isOpen : true,
           vendorType: data.vendorType || 'restaurant',
+          address: data.address || null,
+          city: data.city || null,
+          latitude: data.latitude !== undefined ? parseFloat(data.latitude.toString()) : null,
+          longitude: data.longitude !== undefined ? parseFloat(data.longitude.toString()) : null,
+          deliveryRadiusKm: data.deliveryRadiusKm !== undefined ? parseFloat(data.deliveryRadiusKm.toString()) : null,
+          deliveryTimeMin: data.deliveryTimeMin !== undefined ? parseInt(data.deliveryTimeMin.toString()) : null,
+          deliveryTimeMax: data.deliveryTimeMax !== undefined ? parseInt(data.deliveryTimeMax.toString()) : null,
+          deliveryFeeMode: data.deliveryFeeMode || null,
+          deliveryFee: data.deliveryFee !== undefined ? parseFloat(data.deliveryFee.toString()) : 0.0,
+          minimumOrder: data.minimumOrder !== undefined ? parseFloat(data.minimumOrder.toString()) : 0.0,
+          deliveryFeeFormula: data.deliveryFeeFormula || null,
+          deliveryFeeTiers: data.deliveryFeeTiers || null,
           status: 'ACTIVE',
         }
       });
@@ -573,6 +596,7 @@ export class FirebaseSyncService implements OnModuleInit {
         phone: data.phone || data.phoneNumber || null,
         role: 'DRIVER' as any,
         profileImage: data.profileImage || data.imageUrl || null,
+        walletBalance: data.walletBalance !== undefined ? parseFloat(data.walletBalance.toString()) : 0.0,
       };
 
       if (!user) {
@@ -584,13 +608,14 @@ export class FirebaseSyncService implements OnModuleInit {
         } catch (e) {}
         user = await this.prisma.user.create({ data: userData });
       } else {
-        // Update existing user to keep name/phone in sync
+        // Update existing user to keep name/phone/wallet in sync
         user = await this.prisma.user.update({
           where: { id: user.id },
           data: {
             name: userData.name,
             phone: userData.phone,
             profileImage: userData.profileImage,
+            walletBalance: data.walletBalance !== undefined ? parseFloat(data.walletBalance.toString()) : undefined,
           }
         });
       }
@@ -611,6 +636,8 @@ export class FirebaseSyncService implements OnModuleInit {
           totalTrips: data.totalTrips || 0,
           lastPingAt: new Date(),
           applicationStatus: 'APPROVED',
+          canDeliver: data.canDeliver !== undefined ? data.canDeliver : true,
+          canTransport: data.canTransport !== undefined ? data.canTransport : false,
         },
         create: {
           userId: user.id,
@@ -621,6 +648,8 @@ export class FirebaseSyncService implements OnModuleInit {
           totalTrips: data.totalTrips || 0,
           lastPingAt: new Date(),
           applicationStatus: 'APPROVED',
+          canDeliver: data.canDeliver !== undefined ? data.canDeliver : true,
+          canTransport: data.canTransport !== undefined ? data.canTransport : false,
         }
       });
 

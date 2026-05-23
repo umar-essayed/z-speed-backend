@@ -862,6 +862,13 @@ export class AdminService {
 
     const data = doc.data() as any;
 
+    if (data.status === 'approved') {
+      throw new BadRequestException('Application is already approved');
+    }
+    if (data.status === 'rejected') {
+      throw new BadRequestException('Application is already rejected');
+    }
+
     // 1. Update Firebase status
     await docRef.update({
       status: 'approved',
@@ -877,14 +884,34 @@ export class AdminService {
       this.logger.warn(`Could not update general applications collection for ${applicationId}: ${err.message}`);
     }
 
+    // Update Firestore User Status
+    if (data.userId) {
+      try {
+        await db.collection('users').doc(data.userId).update({
+          applicationStatus: 'approved',
+          status: 'active',
+          role: 'vendor',
+          approvedAt: new Date(),
+          updatedAt: new Date(),
+        });
+      } catch (err) {
+        this.logger.warn(`Could not update Firestore user status for ${data.userId}: ${err.message}`);
+      }
+    }
+
     // 2. If user exists in PostgreSQL, create restaurant & update role
     if (data.userId) {
       const user = await this.prisma.user.findUnique({ where: { id: data.userId } });
       if (user) {
+        // Generate a new Firebase Restaurant Document ID
+        const restDocRef = db.collection('restaurants').doc();
+        const firebaseId = restDocRef.id;
+
         // Create restaurant in PostgreSQL
         const restaurant = await this.prisma.restaurant.create({
           data: {
             ownerId: data.userId,
+            firebaseId: firebaseId,
             name: data.businessName || data.name || 'New Restaurant',
             nameAr: data.businessNameAr || null,
             address: data.address || '',
@@ -896,6 +923,38 @@ export class AdminService {
             payoutPhoneNumber: data.phone,
           },
         });
+
+        // Create restaurant document in Firestore
+        try {
+          const formData = data.formData || {};
+          const biz = formData.businessInfo || {};
+          const contact = formData.contactInfo || {};
+          const branding = formData.branding || {};
+
+          await restDocRef.set({
+            id: firebaseId,
+            ownerId: data.userId,
+            name: data.businessName || data.name || 'New Restaurant',
+            nameAr: data.businessNameAr || '',
+            address: data.address || '',
+            city: data.city || '',
+            vendorType: data.vendorType || 'RESTAURANT',
+            status: 'active',
+            isActive: true,
+            isOpen: false,
+            logoUrl: branding.logoUrl || '',
+            coverImageUrl: branding.coverUrl || '',
+            deliveryRadiusKm: 5.0,
+            deliveryTimeMin: 30,
+            deliveryTimeMax: 45,
+            deliveryFee: 15.0,
+            rating: 5.0,
+            ratingCount: 1,
+            createdAt: new Date(),
+          });
+        } catch (err) {
+          this.logger.error(`Failed to create Firestore restaurant document: ${err.message}`);
+        }
 
         // Auto-create default sections/categories based on vendorType
         const type = (data.vendorType || 'RESTAURANT').toLowerCase();
@@ -988,6 +1047,13 @@ export class AdminService {
 
     const data = doc.data() as any;
 
+    if (data.status === 'approved') {
+      throw new BadRequestException('Application is already approved');
+    }
+    if (data.status === 'rejected') {
+      throw new BadRequestException('Application is already rejected');
+    }
+
     await docRef.update({
       status: 'rejected',
       rejectionReason: reason || 'Application did not meet requirements',
@@ -1014,6 +1080,16 @@ export class AdminService {
         );
       } catch (err) {
         this.logger.warn(`Notification failed: ${err.message}`);
+      }
+
+      try {
+        await db.collection('users').doc(data.userId).update({
+          applicationStatus: 'rejected',
+          status: 'inactive',
+          updatedAt: new Date(),
+        });
+      } catch (err) {
+        this.logger.warn(`Could not update Firestore user status for ${data.userId}: ${err.message}`);
       }
     }
 
@@ -1079,6 +1155,13 @@ export class AdminService {
 
     const data = doc.data() as any;
 
+    if (data.status === 'approved') {
+      throw new BadRequestException('Application is already approved');
+    }
+    if (data.status === 'rejected') {
+      throw new BadRequestException('Application is already rejected');
+    }
+
     await docRef.update({ status: 'approved', approvedAt: new Date() });
 
     try {
@@ -1096,6 +1179,20 @@ export class AdminService {
       
       const canTransport = category === 'transport';
       const canDeliver = !canTransport;
+
+      try {
+        await db.collection('users').doc(data.userId).update({
+          applicationStatus: 'approved',
+          status: 'active',
+          role: 'driver',
+          canTransport: canTransport,
+          canDeliver: canDeliver,
+          approvedAt: new Date(),
+          updatedAt: new Date(),
+        });
+      } catch (err) {
+        this.logger.warn(`Could not update Firestore user status for ${data.userId}: ${err.message}`);
+      }
 
       // Extract nationalId and dateOfBirth
       const nationalId = personalInfo.nationalId || data.nationalId || null;
@@ -1213,6 +1310,17 @@ export class AdminService {
     if (!db) throw new BadRequestException('Firebase not available');
 
     const docRef = db.collection('driver_applications').doc(applicationId);
+    const doc = await docRef.get();
+    if (!doc.exists) throw new NotFoundException('Application not found');
+    const data = doc.data() as any;
+
+    if (data.status === 'approved') {
+      throw new BadRequestException('Application is already approved');
+    }
+    if (data.status === 'rejected') {
+      throw new BadRequestException('Application is already rejected');
+    }
+
     await docRef.update({
       status: 'rejected',
       rejectionReason: reason || 'Requirements not met',
@@ -1227,6 +1335,18 @@ export class AdminService {
       });
     } catch (err) {
       this.logger.warn(`Could not update general applications collection for ${applicationId}: ${err.message}`);
+    }
+
+    if (data.userId) {
+      try {
+        await db.collection('users').doc(data.userId).update({
+          applicationStatus: 'rejected',
+          status: 'inactive',
+          updatedAt: new Date(),
+        });
+      } catch (err) {
+        this.logger.warn(`Could not update Firestore user status for ${data.userId}: ${err.message}`);
+      }
     }
 
     return { message: 'Driver application rejected' };

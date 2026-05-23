@@ -45,7 +45,7 @@ export class PrismaService
   private registerFirestoreSyncMiddleware() {
     const admin = require('firebase-admin');
 
-    this.$use(async (params, next) => {
+    (this as any).$use(async (params: any, next: any) => {
       const result = await next(params);
 
       // Perform Firestore synchronization in background post-commit

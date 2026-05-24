@@ -5,6 +5,7 @@ import { RealtimeGateway } from '../gateway/realtime.gateway';
 import { OrderStateMachineService } from './order-state-machine.service';
 import { OrderStatus, PaymentState, DeliveryRequestStatus } from '@prisma/client';
 import { SignatureUtil } from '../wallet/signature.util';
+import { Cron } from '@nestjs/schedule';
 
 import { OrdersService } from './orders.service';
 
@@ -73,7 +74,7 @@ export class FirebaseSyncService implements OnModuleInit {
     });
 
     // 3. Listen for menu sections (Collection Group)
-    firestore.collectionGroup('sections').onSnapshot(async (snapshot) => {
+    firestore.collectionGroup('menuSections').onSnapshot(async (snapshot) => {
       for (const change of snapshot.docChanges()) {
         await this.syncMenuSection(change.doc);
       }
@@ -487,7 +488,7 @@ export class FirebaseSyncService implements OnModuleInit {
   // Sync Menu Sections FROM Firebase TO Postgres
   private async syncMenuSection(doc: any) {
     const data = doc.data();
-    const path = doc.ref.path; // e.g., restaurants/RES_ID/sections/SEC_ID
+    const path = doc.ref.path; // e.g., restaurants/RES_ID/menuSections/SEC_ID
     const pathParts = path.split('/');
     const fbRestaurantId = pathParts[1];
 
@@ -497,9 +498,23 @@ export class FirebaseSyncService implements OnModuleInit {
       });
 
       if (!restaurant) {
-        // Only warn if the restaurant is actually missing (not just a quiet skip)
-        // this.logger.warn(`Skip sync section ${doc.id}: Restaurant ${fbRestaurantId} not found in Postgres`);
         return;
+      }
+
+      // Loop prevention check
+      const existing = await this.prisma.menuSection.findUnique({
+        where: { firebaseId: doc.id }
+      });
+
+      if (existing) {
+        const isNameEqual = existing.name === (data.name || 'Synced Section') && existing.nameAr === (data.nameAr || null);
+        const isActiveEqual = existing.isActive === (data.isActive !== undefined ? data.isActive : true);
+        const isSortEqual = existing.sortOrder === (data.sortOrder || 0);
+
+        if (isNameEqual && isActiveEqual && isSortEqual) {
+          // Identical, skip updates to prevent infinite loops
+          return;
+        }
       }
 
       await this.prisma.menuSection.upsert({
@@ -519,8 +534,6 @@ export class FirebaseSyncService implements OnModuleInit {
           sortOrder: data.sortOrder || 0,
         }
       });
-
-      // Success log removed to prevent spam
     } catch (error) {
       this.logger.error(`Error syncing menu section ${doc.id}:`, error);
     }
@@ -529,7 +542,7 @@ export class FirebaseSyncService implements OnModuleInit {
   // Sync Food Items FROM Firebase TO Postgres
   private async syncFoodItem(doc: any) {
     const data = doc.data();
-    const path = doc.ref.path; // e.g., restaurants/RES_ID/sections/SEC_ID/items/ITEM_ID
+    const path = doc.ref.path; // e.g., restaurants/RES_ID/menuSections/SEC_ID/items/ITEM_ID
     const pathParts = path.split('/');
     const fbSectionId = pathParts[3];
 
@@ -539,12 +552,65 @@ export class FirebaseSyncService implements OnModuleInit {
       });
 
       if (!section) {
-        // Only warn if the section is actually missing
-        // this.logger.warn(`Skip sync item ${doc.id}: Section ${fbSectionId} not found in Postgres`);
         return;
       }
 
-      await this.prisma.foodItem.upsert({
+      // Loop prevention check
+      const existing = await this.prisma.foodItem.findUnique({
+        where: { firebaseId: doc.id },
+        include: { variants: true }
+      });
+
+      if (existing) {
+        const isNameEqual = existing.name === (data.name || 'Synced Item') && existing.nameAr === (data.nameAr || null);
+        const isDescEqual = existing.description === (data.description || null) && existing.descriptionAr === (data.descriptionAr || null);
+        const isPriceEqual = existing.price === (data.price || data.unitPrice || 0) && existing.originalPrice === (data.originalPrice || null);
+        const isAvailableEqual = existing.isAvailable === (data.isAvailable !== undefined ? data.isAvailable : true);
+        const isStockEqual = existing.stockQuantity === (data.stockQuantity || 0);
+        const isFractionEqual = existing.hasFractions === (data.hasFractions || false) &&
+                                 existing.fractionUnitName === (data.fractionUnitName || null) &&
+                                 existing.fractionUnitNameAr === (data.fractionUnitNameAr || null) &&
+                                 existing.unitsPerParent === (data.unitsPerParent || null) &&
+                                 existing.fractionPrice === (data.fractionPrice || null);
+        
+        let isVariantsEqual = true;
+        if (data.variants && Array.isArray(data.variants)) {
+          if (existing.variants.length !== data.variants.length) {
+            isVariantsEqual = false;
+          } else {
+            for (const v of data.variants) {
+              const match = existing.variants.find(dbV => dbV.id === (v.id || v.firebaseId));
+              if (!match) {
+                isVariantsEqual = false;
+                break;
+              }
+              if (match.name !== v.name || 
+                  match.nameAr !== (v.nameAr || null) ||
+                  match.price !== (v.price || 0) || 
+                  match.originalPrice !== (v.originalPrice || null) ||
+                  match.stockQuantity !== (v.stockQuantity || 0) || 
+                  match.isAvailable !== (v.isAvailable !== undefined ? v.isAvailable : true) ||
+                  match.isFraction !== (v.isFraction || false) ||
+                  match.fractionMultiplier !== (v.fractionMultiplier || null)) {
+                isVariantsEqual = false;
+                break;
+              }
+            }
+          }
+        } else {
+          if (existing.variants.length > 0) {
+            isVariantsEqual = false;
+          }
+        }
+
+        if (isNameEqual && isDescEqual && isPriceEqual && isAvailableEqual && isStockEqual && isFractionEqual && isVariantsEqual) {
+          // Fields are identical! Skip PG update to prevent infinite loops.
+          return;
+        }
+      }
+
+      // Upsert the food item
+      const foodItem = await this.prisma.foodItem.upsert({
         where: { firebaseId: doc.id },
         update: {
           name: data.name || 'Synced Item',
@@ -555,7 +621,17 @@ export class FirebaseSyncService implements OnModuleInit {
           price: data.price || data.unitPrice || 0,
           originalPrice: data.originalPrice || null,
           isAvailable: data.isAvailable !== undefined ? data.isAvailable : true,
-          addons: data.addonGroups || null,
+          stockQuantity: data.stockQuantity || 0,
+          hasFractions: data.hasFractions || false,
+          fractionUnitName: data.fractionUnitName || null,
+          fractionUnitNameAr: data.fractionUnitNameAr || null,
+          unitsPerParent: data.unitsPerParent || null,
+          fractionPrice: data.fractionPrice || null,
+          addons: data.addons || data.addonGroups || null,
+          allergens: data.allergens || [],
+          prepTimeMin: data.prepTimeMin || 10,
+          unit: data.unit || null,
+          tags: data.tags || [],
         },
         create: {
           firebaseId: doc.id,
@@ -568,11 +644,70 @@ export class FirebaseSyncService implements OnModuleInit {
           price: data.price || data.unitPrice || 0,
           originalPrice: data.originalPrice || null,
           isAvailable: data.isAvailable !== undefined ? data.isAvailable : true,
-          addons: data.addonGroups || null,
+          stockQuantity: data.stockQuantity || 0,
+          hasFractions: data.hasFractions || false,
+          fractionUnitName: data.fractionUnitName || null,
+          fractionUnitNameAr: data.fractionUnitNameAr || null,
+          unitsPerParent: data.unitsPerParent || null,
+          fractionPrice: data.fractionPrice || null,
+          addons: data.addons || data.addonGroups || null,
+          allergens: data.allergens || [],
+          prepTimeMin: data.prepTimeMin || 10,
+          unit: data.unit || null,
+          tags: data.tags || [],
         }
       });
 
-      // Success log removed to prevent spam
+      // Synchronize variants
+      if (data.variants && Array.isArray(data.variants)) {
+        const activeVariantIds: string[] = [];
+
+        for (const variantData of data.variants) {
+          const vId = variantData.id || variantData.firebaseId;
+          if (!vId) continue;
+
+          const dbVariant = await this.prisma.foodItemVariant.upsert({
+            where: { id: vId },
+            update: {
+              name: variantData.name,
+              nameAr: variantData.nameAr || null,
+              price: variantData.price || 0,
+              originalPrice: variantData.originalPrice || null,
+              stockQuantity: variantData.stockQuantity || 0,
+              isAvailable: variantData.isAvailable !== undefined ? variantData.isAvailable : true,
+              isFraction: variantData.isFraction || false,
+              fractionMultiplier: variantData.fractionMultiplier || null,
+              firebaseId: vId,
+            },
+            create: {
+              id: vId,
+              foodItemId: foodItem.id,
+              name: variantData.name,
+              nameAr: variantData.nameAr || null,
+              price: variantData.price || 0,
+              originalPrice: variantData.originalPrice || null,
+              stockQuantity: variantData.stockQuantity || 0,
+              isAvailable: variantData.isAvailable !== undefined ? variantData.isAvailable : true,
+              isFraction: variantData.isFraction || false,
+              fractionMultiplier: variantData.fractionMultiplier || null,
+              firebaseId: vId,
+            }
+          });
+          activeVariantIds.push(dbVariant.id);
+        }
+
+        // Delete variants not present in Firestore
+        await this.prisma.foodItemVariant.deleteMany({
+          where: {
+            foodItemId: foodItem.id,
+            id: { notIn: activeVariantIds }
+          }
+        });
+      } else {
+        await this.prisma.foodItemVariant.deleteMany({
+          where: { foodItemId: foodItem.id }
+        });
+      }
     } catch (error) {
       this.logger.error(`Error syncing food item ${doc.id}:`, error);
     }
@@ -770,7 +905,7 @@ export class FirebaseSyncService implements OnModuleInit {
 
     try {
       // 1. Sync all sections
-      const sectionSnapshot = await firestore.collectionGroup('sections').get();
+      const sectionSnapshot = await firestore.collectionGroup('menuSections').get();
       for (const doc of sectionSnapshot.docs) {
         await this.syncMenuSection(doc);
       }
@@ -1234,5 +1369,234 @@ export class FirebaseSyncService implements OnModuleInit {
     } catch (error) {
       this.logger.error('Failed to create delivery request in Firebase:', error);
     }
+  }
+
+  @Cron('*/5 * * * *')
+  async verifyAndReconcileDatabases() {
+    this.logger.log('⏰ Starting 5-minute database sync verification cron job...');
+    const firestore = this.firebaseAdmin.getFirestore();
+    if (!firestore) {
+      this.logger.warn('Firestore is not initialized, skipping validation cron.');
+      return;
+    }
+
+    try {
+      // 1. Fetch all Firestore data in bulk
+      const fsRestaurantsSnapshot = await firestore.collection('restaurants').get();
+      const fsSectionsSnapshot = await firestore.collectionGroup('menuSections').get();
+      const fsItemsSnapshot = await firestore.collectionGroup('items').get();
+
+      const fsRestaurantsMap = new Map(fsRestaurantsSnapshot.docs.map(doc => [doc.id, doc]));
+      const fsSectionsMap = new Map(fsSectionsSnapshot.docs.map(doc => [doc.id, doc]));
+      const fsItemsMap = new Map(fsItemsSnapshot.docs.map(doc => [doc.id, doc]));
+
+      // 2. Fetch all PostgreSQL data
+      const pgRestaurants = await this.prisma.restaurant.findMany();
+      const pgSections = await this.prisma.menuSection.findMany();
+      const pgItems = await this.prisma.foodItem.findMany({ include: { variants: true } });
+
+      let reconciledRestaurants = 0;
+      let reconciledSections = 0;
+      let reconciledItems = 0;
+
+      // --- RECONCILE RESTAURANTS ---
+      for (const pgRest of pgRestaurants) {
+        const docId = pgRest.firebaseId || pgRest.id;
+        const fsDoc = fsRestaurantsMap.get(docId);
+
+        if (!fsDoc) {
+          this.logger.log(`Cron: Restaurant ${pgRest.name} (${docId}) missing in Firestore. Syncing...`);
+          await this.writeRestaurantToFirestore(firestore, pgRest);
+          reconciledRestaurants++;
+        } else {
+          const data = fsDoc.data();
+          if (data.name !== pgRest.name || data.isActive !== pgRest.isActive || data.isOpen !== pgRest.isOpen) {
+            await this.writeRestaurantToFirestore(firestore, pgRest);
+            reconciledRestaurants++;
+          }
+        }
+      }
+
+      // --- RECONCILE SECTIONS ---
+      for (const pgSec of pgSections) {
+        const docId = pgSec.firebaseId || pgSec.id;
+        const fsDoc = fsSectionsMap.get(docId);
+        
+        if (!fsDoc) {
+          this.logger.log(`Cron: MenuSection ${pgSec.name} (${docId}) missing in Firestore. Syncing...`);
+          await this.writeSectionToFirestore(firestore, pgSec);
+          reconciledSections++;
+        } else {
+          const data = fsDoc.data();
+          if (data.name !== pgSec.name || data.nameAr !== pgSec.nameAr || data.isActive !== pgSec.isActive || data.sortOrder !== pgSec.sortOrder) {
+            await this.writeSectionToFirestore(firestore, pgSec);
+            reconciledSections++;
+          }
+        }
+      }
+
+      // --- RECONCILE ITEMS ---
+      for (const pgItem of pgItems) {
+        const docId = pgItem.firebaseId || pgItem.id;
+        const fsDoc = fsItemsMap.get(docId);
+
+        if (!fsDoc) {
+          this.logger.log(`Cron: FoodItem ${pgItem.name} (${docId}) missing in Firestore. Syncing...`);
+          await this.writeItemToFirestore(firestore, pgItem);
+          reconciledItems++;
+        } else {
+          const data = fsDoc.data();
+          const isNameEqual = data.name === pgItem.name && data.nameAr === pgItem.nameAr;
+          const isPriceEqual = data.price === pgItem.price && data.isAvailable === pgItem.isAvailable;
+          
+          let isVariantsEqual = true;
+          const fsVariants = data.variants || [];
+          if (fsVariants.length !== pgItem.variants.length) {
+            isVariantsEqual = false;
+          } else {
+            for (const v of pgItem.variants) {
+              const fsV = fsVariants.find((fv: any) => fv.id === (v.firebaseId || v.id));
+              if (!fsV || fsV.name !== v.name || fsV.price !== v.price || fsV.stockQuantity !== v.stockQuantity) {
+                isVariantsEqual = false;
+                break;
+              }
+            }
+          }
+
+          if (!isNameEqual || !isPriceEqual || !isVariantsEqual) {
+            await this.writeItemToFirestore(firestore, pgItem);
+            reconciledItems++;
+          }
+        }
+      }
+
+      // Reverse Check: Firestore to Postgres
+      for (const [id, doc] of fsSectionsMap.entries()) {
+        const exists = pgSections.some(s => (s.firebaseId === id || s.id === id));
+        if (!exists) {
+          this.logger.log(`Cron: MenuSection ${doc.data().name} (${id}) missing in Postgres. Syncing...`);
+          await this.syncMenuSection(doc);
+          reconciledSections++;
+        }
+      }
+
+      for (const [id, doc] of fsItemsMap.entries()) {
+        const exists = pgItems.some(i => (i.firebaseId === id || i.id === id));
+        if (!exists) {
+          this.logger.log(`Cron: FoodItem ${doc.data().name} (${id}) missing in Postgres. Syncing...`);
+          await this.syncFoodItem(doc);
+          reconciledItems++;
+        }
+      }
+
+      this.logger.log(`⏰ Cron Sync Done! Reconciled: ${reconciledRestaurants} restaurants, ${reconciledSections} sections, ${reconciledItems} items.`);
+    } catch (error) {
+      this.logger.error('Error during database sync verification cron:', error);
+    }
+  }
+
+  private async writeRestaurantToFirestore(db: any, result: any) {
+    const docId = result.firebaseId || result.id;
+    const syncData: any = {
+      name: result.name,
+      nameAr: result.nameAr || null,
+      description: result.description || null,
+      logoUrl: result.logoUrl || null,
+      coverImageUrl: result.coverImageUrl || null,
+      isActive: result.isActive,
+      isOpen: result.isOpen,
+      vendorType: result.vendorType || 'RESTAURANT',
+      address: result.address || null,
+      city: result.city || null,
+      latitude: result.latitude || null,
+      longitude: result.longitude || null,
+      deliveryRadiusKm: result.deliveryRadiusKm || null,
+      deliveryTimeMin: result.deliveryTimeMin || null,
+      deliveryTimeMax: result.deliveryTimeMax || null,
+      deliveryFeeMode: result.deliveryFeeMode || null,
+      deliveryFee: result.deliveryFee || 0.0,
+      minimumOrder: result.minimumOrder || 0.0,
+      updatedAt: new Date(),
+    };
+    if (result.deliveryFeeTiers) syncData.deliveryFeeTiers = result.deliveryFeeTiers;
+    if (result.deliveryFeeFormula) syncData.deliveryFeeFormula = result.deliveryFeeFormula;
+    await db.collection('restaurants').doc(docId).set(syncData, { merge: true }).catch(() => {});
+  }
+
+  private async writeSectionToFirestore(db: any, result: any) {
+    const docId = result.firebaseId || result.id;
+    const restaurantId = result.restaurantId;
+    if (!restaurantId) return;
+
+    const syncData = {
+      id: docId,
+      restaurantId: restaurantId,
+      name: result.name,
+      nameAr: result.nameAr || null,
+      isActive: result.isActive,
+      sortOrder: result.sortOrder ?? 0,
+      updatedAt: new Date(),
+    };
+    await db.collection('restaurants').doc(restaurantId).collection('menuSections').doc(docId).set(syncData, { merge: true }).catch(() => {});
+  }
+
+  private async writeItemToFirestore(db: any, result: any) {
+    const itemId = result.firebaseId || result.id;
+    const sectionId = result.sectionId;
+    if (!sectionId) return;
+
+    const section = await this.prisma.menuSection.findUnique({
+      where: { id: sectionId },
+      select: { restaurantId: true }
+    }).catch(() => null);
+
+    const restaurantId = section?.restaurantId;
+    if (!restaurantId) return;
+
+    const variants = result.variants || await this.prisma.foodItemVariant.findMany({
+      where: { foodItemId: result.id }
+    }).catch(() => []);
+
+    const syncData = {
+      id: itemId,
+      sectionId: sectionId,
+      restaurantId: restaurantId,
+      name: result.name,
+      nameAr: result.nameAr || null,
+      description: result.description || null,
+      descriptionAr: result.descriptionAr || null,
+      imageUrl: result.imageUrl || null,
+      price: result.price,
+      originalPrice: result.originalPrice || null,
+      isOnSale: result.isOnSale,
+      isAvailable: result.isAvailable,
+      stockQuantity: result.stockQuantity,
+      hasFractions: result.hasFractions,
+      fractionUnitName: result.fractionUnitName || null,
+      fractionUnitNameAr: result.fractionUnitNameAr || null,
+      unitsPerParent: result.unitsPerParent || null,
+      fractionPrice: result.fractionPrice || null,
+      addons: result.addons || null,
+      allergens: result.allergens || [],
+      prepTimeMin: result.prepTimeMin ?? 10,
+      unit: result.unit || null,
+      tags: result.tags || [],
+      updatedAt: new Date(),
+      variants: variants.map((v: any) => ({
+        id: v.firebaseId || v.id,
+        foodItemId: v.foodItemId,
+        name: v.name,
+        nameAr: v.nameAr || null,
+        price: v.price,
+        originalPrice: v.originalPrice || null,
+        stockQuantity: v.stockQuantity,
+        isAvailable: v.isAvailable,
+        isFraction: v.isFraction,
+        fractionMultiplier: v.fractionMultiplier || null,
+        updatedAt: v.updatedAt
+      }))
+    };
+
+    await db.collection('restaurants').doc(restaurantId).collection('menuSections').doc(sectionId).collection('items').doc(itemId).set(syncData, { merge: true }).catch(() => {});
   }
 }

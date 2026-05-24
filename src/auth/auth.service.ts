@@ -125,20 +125,34 @@ export class AuthService {
       try {
         const auth = this.firebaseAdmin.getAuth();
         if (auth) {
-          const fbUser = await auth.createUser({
-            email: dto.email,
-            password: dto.password,
-            displayName: dto.name,
-          });
-          await auth.setCustomUserClaims(fbUser.uid, {
-            role: user.role,
-            postgresId: user.id,
-          });
-          await this.prisma.user.update({
-            where: { id: user.id },
-            data: { firebaseUid: fbUser.uid },
-          });
-          this.logger.log(`Synced new ${user.role} to Firebase Auth: ${fbUser.uid}`);
+          let fbUser;
+          try {
+            fbUser = await auth.createUser({
+              email: dto.email,
+              password: dto.password,
+              displayName: dto.name,
+            });
+          } catch (createErr: any) {
+            if (createErr.code === 'auth/email-already-exists') {
+              this.logger.log(`User ${dto.email} already exists in Firebase Auth. Linking to existing account...`);
+              fbUser = await auth.getUserByEmail(dto.email);
+              await auth.updateUser(fbUser.uid, { password: dto.password });
+            } else {
+              throw createErr;
+            }
+          }
+
+          if (fbUser) {
+            await auth.setCustomUserClaims(fbUser.uid, {
+              role: user.role,
+              postgresId: user.id,
+            });
+            await this.prisma.user.update({
+              where: { id: user.id },
+              data: { firebaseUid: fbUser.uid },
+            });
+            this.logger.log(`Synced new ${user.role} to Firebase Auth: ${fbUser.uid}`);
+          }
         }
       } catch (err) {
         this.logger.error(`Failed to sync new user to Firebase: ${err}`);
@@ -156,6 +170,36 @@ export class AuthService {
 
   async emailLogin(req: any, dto: EmailLoginDto, res: Response) {
     this.logger.log(`emailLogin: ${dto.email}`);
+
+    // On-the-fly migration: if user exists in PostgreSQL but has no supabaseId, create them in Supabase Auth first
+    try {
+      let pgUser = await this.prisma.user.findFirst({
+        where: { email: dto.email }
+      });
+      if (pgUser && !pgUser.supabaseId) {
+        this.logger.log(`Migrating old user ${dto.email} to Supabase Auth...`);
+        const { data: sbUser, error: sbErr } = await this.supabaseService.authAdmin.createUser({
+          email: dto.email,
+          password: dto.password,
+          email_confirm: true,
+          user_metadata: {
+            name: pgUser.name || dto.email.split('@')[0],
+            role: pgUser.role,
+          }
+        });
+        if (!sbErr && sbUser?.user) {
+          await this.prisma.user.update({
+            where: { id: pgUser.id },
+            data: { supabaseId: sbUser.user.id }
+          });
+          this.logger.log(`Successfully migrated user ${dto.email} to Supabase Auth: ${sbUser.user.id}`);
+        } else if (sbErr) {
+          this.logger.warn(`Could not migrate user ${dto.email} to Supabase: ${sbErr.message}`);
+        }
+      }
+    } catch (err: any) {
+      this.logger.error(`Error during on-the-fly Supabase migration check: ${err.message}`);
+    }
 
     // Sign in via Supabase Auth to validate credentials
     const { data, error } = await this.supabaseService.signInWithPassword(

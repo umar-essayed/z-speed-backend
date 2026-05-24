@@ -1528,16 +1528,22 @@ export class FirebaseSyncService implements OnModuleInit {
     const restaurantId = result.restaurantId;
     if (!restaurantId) return;
 
+    const restaurant = await this.prisma.restaurant.findUnique({
+      where: { id: restaurantId },
+      select: { firebaseId: true }
+    }).catch(() => null);
+    const firestoreRestaurantId = restaurant?.firebaseId || restaurantId;
+
     const syncData = {
       id: docId,
-      restaurantId: restaurantId,
+      restaurantId: firestoreRestaurantId,
       name: result.name,
       nameAr: result.nameAr || null,
       isActive: result.isActive,
       sortOrder: result.sortOrder ?? 0,
       updatedAt: new Date(),
     };
-    await db.collection('restaurants').doc(restaurantId).collection('menuSections').doc(docId).set(syncData, { merge: true }).catch(() => {});
+    await db.collection('restaurants').doc(firestoreRestaurantId).collection('menuSections').doc(docId).set(syncData, { merge: true }).catch(() => {});
   }
 
   private async writeItemToFirestore(db: any, result: any) {
@@ -1547,11 +1553,18 @@ export class FirebaseSyncService implements OnModuleInit {
 
     const section = await this.prisma.menuSection.findUnique({
       where: { id: sectionId },
-      select: { restaurantId: true }
+      select: { 
+        restaurantId: true, 
+        firebaseId: true,
+        restaurant: { select: { firebaseId: true } }
+      }
     }).catch(() => null);
 
     const restaurantId = section?.restaurantId;
     if (!restaurantId) return;
+
+    const firestoreRestaurantId = section?.restaurant?.firebaseId || restaurantId;
+    const firestoreSectionId = section?.firebaseId || sectionId;
 
     const variants = result.variants || await this.prisma.foodItemVariant.findMany({
       where: { foodItemId: result.id }
@@ -1559,8 +1572,8 @@ export class FirebaseSyncService implements OnModuleInit {
 
     const syncData = {
       id: itemId,
-      sectionId: sectionId,
-      restaurantId: restaurantId,
+      sectionId: firestoreSectionId,
+      restaurantId: firestoreRestaurantId,
       name: result.name,
       nameAr: result.nameAr || null,
       description: result.description || null,
@@ -1597,6 +1610,6 @@ export class FirebaseSyncService implements OnModuleInit {
       }))
     };
 
-    await db.collection('restaurants').doc(restaurantId).collection('menuSections').doc(sectionId).collection('items').doc(itemId).set(syncData, { merge: true }).catch(() => {});
+    await db.collection('restaurants').doc(firestoreRestaurantId).collection('menuSections').doc(firestoreSectionId).collection('items').doc(itemId).set(syncData, { merge: true }).catch(() => {});
   }
 }

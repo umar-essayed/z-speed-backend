@@ -210,22 +210,34 @@ export class PrismaService
       restaurantId = preDeleteData?.restaurantId;
       sectionId = preDeleteData?.id;
       if (restaurantId && sectionId) {
-        await db.collection('restaurants').doc(restaurantId).collection('menuSections').doc(sectionId).delete().catch(() => {});
+        const restaurant = await this.restaurant.findUnique({
+          where: { id: restaurantId },
+          select: { firebaseId: true }
+        }).catch(() => null);
+        const firestoreRestaurantId = restaurant?.firebaseId || restaurantId;
+
+        await db.collection('restaurants').doc(firestoreRestaurantId).collection('menuSections').doc(sectionId).delete().catch(() => {});
       }
       return;
     }
 
     if (result && result.id && restaurantId) {
+      const restaurant = await this.restaurant.findUnique({
+        where: { id: restaurantId },
+        select: { firebaseId: true }
+      }).catch(() => null);
+      const firestoreRestaurantId = restaurant?.firebaseId || restaurantId;
+
       const syncData: any = {
         id: sectionId,
-        restaurantId: restaurantId,
+        restaurantId: firestoreRestaurantId,
         name: result.name,
         nameAr: result.nameAr || null,
         isActive: result.isActive,
         sortOrder: result.sortOrder ?? 0,
         updatedAt: new Date(),
       };
-      await db.collection('restaurants').doc(restaurantId).collection('menuSections').doc(sectionId).set(syncData, { merge: true }).catch(() => {});
+      await db.collection('restaurants').doc(firestoreRestaurantId).collection('menuSections').doc(sectionId).set(syncData, { merge: true }).catch(() => {});
     }
   }
 
@@ -239,13 +251,20 @@ export class PrismaService
       if (sectionId && itemId) {
         const section = await this.menuSection.findUnique({
           where: { id: sectionId },
-          select: { restaurantId: true }
+          select: { 
+            restaurantId: true, 
+            firebaseId: true,
+            restaurant: { select: { firebaseId: true } }
+          }
         }).catch(() => null);
         
         const restaurantId = section?.restaurantId;
-        if (restaurantId) {
-          await db.collection('restaurants').doc(restaurantId)
-            .collection('menuSections').doc(sectionId)
+        const firestoreRestaurantId = section?.restaurant?.firebaseId || restaurantId;
+        const firestoreSectionId = section?.firebaseId || sectionId;
+
+        if (firestoreRestaurantId && firestoreSectionId) {
+          await db.collection('restaurants').doc(firestoreRestaurantId)
+            .collection('menuSections').doc(firestoreSectionId)
             .collection('items').doc(itemId)
             .delete().catch(() => {});
         }
@@ -256,11 +275,18 @@ export class PrismaService
     if (result && result.id && sectionId) {
       const section = await this.menuSection.findUnique({
         where: { id: sectionId },
-        select: { restaurantId: true }
+        select: { 
+          restaurantId: true, 
+          firebaseId: true,
+          restaurant: { select: { firebaseId: true } }
+        }
       }).catch(() => null);
       
       const restaurantId = section?.restaurantId;
       if (!restaurantId) return;
+
+      const firestoreRestaurantId = section?.restaurant?.firebaseId || restaurantId;
+      const firestoreSectionId = section?.firebaseId || sectionId;
 
       const variants = await this.foodItemVariant.findMany({
         where: { foodItemId: result.id }
@@ -268,8 +294,8 @@ export class PrismaService
 
       const syncData: any = {
         id: itemId,
-        sectionId: sectionId,
-        restaurantId: restaurantId,
+        sectionId: firestoreSectionId,
+        restaurantId: firestoreRestaurantId,
         name: result.name,
         nameAr: result.nameAr || null,
         description: result.description || null,
@@ -306,8 +332,8 @@ export class PrismaService
         }))
       };
 
-      await db.collection('restaurants').doc(restaurantId)
-        .collection('menuSections').doc(sectionId)
+      await db.collection('restaurants').doc(firestoreRestaurantId)
+        .collection('menuSections').doc(firestoreSectionId)
         .collection('items').doc(itemId)
         .set(syncData, { merge: true }).catch(() => {});
     }

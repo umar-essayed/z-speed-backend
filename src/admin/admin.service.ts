@@ -368,10 +368,25 @@ export class AdminService {
       throw new BadRequestException(`Invalid status. Must be one of: ${validStatuses.join(', ')}`);
     }
 
-    return this.prisma.user.update({
+    const updated = await this.prisma.user.update({
       where: { id },
       data: { status: status.toUpperCase() as any },
     });
+
+    // Sync to Firestore
+    try {
+      const db = this.firebase.getFirestore();
+      if (db && user.firebaseUid) {
+        await db.collection('users').doc(user.firebaseUid).update({
+          status: status.toLowerCase(),
+          updatedAt: new Date(),
+        });
+      }
+    } catch (err) {
+      this.logger.warn(`Failed to sync user status update to Firestore: ${err.message}`);
+    }
+
+    return updated;
   }
 
   async updateUserRole(adminId: string, targetUserId: string, newRole: string) {
@@ -527,8 +542,8 @@ export class AdminService {
     // Sync User capability flags to Firestore
     try {
       const db = this.firebase.getFirestore();
-      if (db) {
-        const userDocRef = db.collection('users').doc(profile.userId);
+      if (db && profile.user.firebaseUid) {
+        const userDocRef = db.collection('users').doc(profile.user.firebaseUid);
         await userDocRef.update({
           role: 'DRIVER',
           applicationStatus: 'approved',
@@ -536,6 +551,42 @@ export class AdminService {
           canDeliver: profile.canDeliver,
           canTransport: profile.canTransport,
         });
+
+        // Initialize driver profile in driverProfiles collection in Firestore
+        const dpDocRef = db.collection('driverProfiles').doc(profile.user.firebaseUid);
+        const dpSnap = await dpDocRef.get();
+        if (!dpSnap.exists) {
+          const vehicle = await this.prisma.vehicle.findUnique({
+            where: { driverProfileId: profile.id }
+          });
+          await dpDocRef.set({
+            userId: profile.user.firebaseUid,
+            status: 'offline',
+            vehicleType: vehicle?.type || 'BIKE',
+            vehicleMake: vehicle?.make || 'Unknown',
+            vehicleModel: vehicle?.model || 'Unknown',
+            licensePlate: vehicle?.plateNumber || 'Unknown',
+            licenseNumber: '',
+            phoneNumber: profile.user.phone || '',
+            rating: profile.rating || 0.0,
+            ratingCount: profile.ratingCount || 0,
+            totalTrips: profile.totalTrips || 0,
+            totalEarnings: profile.totalEarnings || 0.0,
+            acceptanceRate: profile.acceptanceRate || 1.0,
+            totalAccepted: profile.totalAccepted || 0,
+            totalRejected: profile.totalRejected || 0,
+            walletBalance: profile.user.walletBalance || 0.0,
+            payoutFrequency: 'weekly',
+            minimumPayout: 100.0,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
+        } else {
+          await dpDocRef.update({
+            status: 'offline',
+            updatedAt: new Date(),
+          });
+        }
       }
     } catch (err) {
       this.logger.warn(`Failed to sync driver ${profile.userId} approval to Firestore: ${err.message}`);
@@ -573,6 +624,21 @@ export class AdminService {
       where: { id: profile.userId },
       data: { role: Role.CUSTOMER },
     });
+
+    // Sync to Firestore
+    try {
+      const db = this.firebase.getFirestore();
+      if (db && profile.user.firebaseUid) {
+        const userDocRef = db.collection('users').doc(profile.user.firebaseUid);
+        await userDocRef.update({
+          role: 'CUSTOMER',
+          status: 'inactive',
+          applicationStatus: 'rejected',
+        });
+      }
+    } catch (err) {
+      this.logger.warn(`Failed to sync driver rejection to Firestore: ${err.message}`);
+    }
 
     // Notify driver
     try {
@@ -739,6 +805,32 @@ export class AdminService {
       data: { role: Role.VENDOR },
     });
 
+    // Sync to Firestore
+    try {
+      const db = this.firebase.getFirestore();
+      if (db) {
+        // 1. Update owner user in Firestore
+        if (restaurant.owner.firebaseUid) {
+          await db.collection('users').doc(restaurant.owner.firebaseUid).update({
+            role: 'vendor',
+            status: 'active',
+            applicationStatus: 'approved',
+            updatedAt: new Date(),
+          });
+        }
+        // 2. Update restaurant status in Firestore
+        if (restaurant.firebaseId) {
+          await db.collection('restaurants').doc(restaurant.firebaseId).update({
+            status: 'active',
+            isActive: true,
+            updatedAt: new Date(),
+          });
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`Failed to sync restaurant ${restaurantId} approval to Firestore: ${err.message}`);
+    }
+
     // Notify vendor
     try {
       await this.notifications.createNotification(
@@ -766,6 +858,31 @@ export class AdminService {
       data: { status: AccountStatus.INACTIVE, isActive: false },
     });
 
+    // Sync to Firestore
+    try {
+      const db = this.firebase.getFirestore();
+      if (db) {
+        // 1. Update owner user in Firestore
+        if (restaurant.owner.firebaseUid) {
+          await db.collection('users').doc(restaurant.owner.firebaseUid).update({
+            status: 'inactive',
+            applicationStatus: 'rejected',
+            updatedAt: new Date(),
+          });
+        }
+        // 2. Update restaurant status in Firestore
+        if (restaurant.firebaseId) {
+          await db.collection('restaurants').doc(restaurant.firebaseId).update({
+            status: 'inactive',
+            isActive: false,
+            updatedAt: new Date(),
+          });
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`Failed to sync restaurant ${restaurantId} rejection to Firestore: ${err.message}`);
+    }
+
     try {
       await this.notifications.createNotification(
         restaurant.ownerId,
@@ -788,7 +905,14 @@ export class AdminService {
     if (!validStatuses.includes(upperStatus)) {
       throw new BadRequestException(`Invalid status`);
     }
-    return this.prisma.restaurant.update({
+
+    const restaurant = await this.prisma.restaurant.findUnique({
+      where: { id: restaurantId },
+      include: { owner: true },
+    });
+    if (!restaurant) throw new NotFoundException('Restaurant not found');
+
+    const updated = await this.prisma.restaurant.update({
       where: { id: restaurantId },
       data: {
         status: upperStatus as AccountStatus,
@@ -796,6 +920,31 @@ export class AdminService {
         isOpen: upperStatus === 'ACTIVE' ? undefined : false,
       },
     });
+
+    // Sync to Firestore
+    try {
+      const db = this.firebase.getFirestore();
+      if (db) {
+        const firestoreStatus = upperStatus.toLowerCase();
+        if (restaurant.firebaseId) {
+          await db.collection('restaurants').doc(restaurant.firebaseId).update({
+            status: firestoreStatus,
+            isActive: upperStatus === 'ACTIVE',
+            updatedAt: new Date(),
+          });
+        }
+        if (restaurant.owner.firebaseUid) {
+          await db.collection('users').doc(restaurant.owner.firebaseUid).update({
+            status: firestoreStatus,
+            updatedAt: new Date(),
+          });
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`Failed to sync restaurant status update to Firestore: ${err.message}`);
+    }
+
+    return updated;
   }
 
   // =============================================
@@ -901,7 +1050,7 @@ export class AdminService {
 
     // 2. If user exists in PostgreSQL, create restaurant & update role
     if (data.userId) {
-      const user = await this.prisma.user.findUnique({ where: { id: data.userId } });
+      const user = await this.prisma.user.findFirst({ where: { firebaseUid: data.userId } });
       if (user) {
         // Generate a new Firebase Restaurant Document ID
         const restDocRef = db.collection('restaurants').doc();
@@ -910,7 +1059,7 @@ export class AdminService {
         // Create restaurant in PostgreSQL
         const restaurant = await this.prisma.restaurant.create({
           data: {
-            ownerId: data.userId,
+            ownerId: user.id,
             firebaseId: firebaseId,
             name: data.businessName || data.name || 'New Restaurant',
             nameAr: data.businessNameAr || null,
@@ -1016,14 +1165,14 @@ export class AdminService {
 
         // Update user role to VENDOR
         await this.prisma.user.update({
-          where: { id: data.userId },
+          where: { id: user.id },
           data: { role: Role.VENDOR },
         });
 
         // Send notification
         try {
           await this.notifications.createNotification(
-            data.userId,
+            user.id,
             'Application Approved! 🎉',
             `Your application for "${data.businessName || data.name}" has been approved!`,
             'vendor_approved',
@@ -1072,17 +1221,6 @@ export class AdminService {
 
     if (data.userId) {
       try {
-        await this.notifications.createNotification(
-          data.userId,
-          'Application Update',
-          reason ? `Your application was not approved. Reason: ${reason}` : 'Your application was not approved.',
-          'vendor_rejected',
-        );
-      } catch (err) {
-        this.logger.warn(`Notification failed: ${err.message}`);
-      }
-
-      try {
         await db.collection('users').doc(data.userId).update({
           applicationStatus: 'rejected',
           status: 'inactive',
@@ -1090,6 +1228,26 @@ export class AdminService {
         });
       } catch (err) {
         this.logger.warn(`Could not update Firestore user status for ${data.userId}: ${err.message}`);
+      }
+
+      const user = await this.prisma.user.findFirst({ where: { firebaseUid: data.userId } });
+      if (user) {
+        // Update postgres restaurant status to INACTIVE
+        await this.prisma.restaurant.updateMany({
+          where: { ownerId: user.id },
+          data: { status: AccountStatus.INACTIVE, isActive: false },
+        });
+
+        try {
+          await this.notifications.createNotification(
+            user.id,
+            'Application Update',
+            reason ? `Your application was not approved. Reason: ${reason}` : 'Your application was not approved.',
+            'vendor_rejected',
+          );
+        } catch (err) {
+          this.logger.warn(`Notification failed: ${err.message}`);
+        }
       }
     }
 
@@ -1217,10 +1375,10 @@ export class AdminService {
       const facePhotoUrl = docs.facePhotoUrl || docUrlsList[5] || null;
       const vehiclePhotoUrl = docs.vehiclePhotoUrl || docUrlsList[6] || null;
 
-      const user = await this.prisma.user.findUnique({ where: { id: data.userId } });
+      const user = await this.prisma.user.findFirst({ where: { firebaseUid: data.userId } });
       if (user) {
         const profile = await this.prisma.driverProfile.upsert({
-          where: { userId: data.userId },
+          where: { userId: user.id },
           update: { 
             applicationStatus: 'APPROVED' as any, 
             isAvailable: true,
@@ -1234,7 +1392,7 @@ export class AdminService {
             dateOfBirth,
           },
           create: { 
-            userId: data.userId, 
+            userId: user.id, 
             applicationStatus: 'APPROVED' as any, 
             isAvailable: true,
             canDeliver,
@@ -1279,7 +1437,7 @@ export class AdminService {
           });
         }
 
-        await this.prisma.user.update({ where: { id: data.userId }, data: { role: Role.DRIVER } });
+        await this.prisma.user.update({ where: { id: user.id }, data: { role: Role.DRIVER } });
 
         // Update the user's Firestore document so mobile client refreshes role capabilities instantly
         const userDocRef = db.collection('users').doc(data.userId);
@@ -1293,7 +1451,7 @@ export class AdminService {
 
         try {
           await this.notifications.createNotification(
-            data.userId,
+            user.id,
             'Driver Application Approved! 🚀',
             'Your application has been approved. Welcome to Z-Speed!',
             'driver_approved',
@@ -1346,6 +1504,28 @@ export class AdminService {
         });
       } catch (err) {
         this.logger.warn(`Could not update Firestore user status for ${data.userId}: ${err.message}`);
+      }
+
+      const user = await this.prisma.user.findFirst({ where: { firebaseUid: data.userId } });
+      if (user) {
+        await this.prisma.driverProfile.updateMany({
+          where: { userId: user.id },
+          data: {
+            applicationStatus: 'REJECTED' as any,
+            rejectionReason: reason || 'Requirements not met',
+          }
+        });
+
+        try {
+          await this.notifications.createNotification(
+            user.id,
+            'Application Update',
+            reason ? `Your driver application was not approved. Reason: ${reason}` : 'Your driver application was not approved.',
+            'driver_rejected',
+          );
+        } catch (err) {
+          this.logger.warn(`Notification failed: ${err.message}`);
+        }
       }
     }
 

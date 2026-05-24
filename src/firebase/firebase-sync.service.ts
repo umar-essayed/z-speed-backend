@@ -58,6 +58,19 @@ export class FirebaseSyncService implements OnModuleInit {
     } catch (err) {
       this.logger.error('Error verifying vendor applications:', err);
     }
+
+    // 3. Sync Restaurants
+    try {
+      const restaurantsSnapshot = await firestore.collection('restaurants').get();
+      let syncedRestaurants = 0;
+      for (const doc of restaurantsSnapshot.docs) {
+        await this.syncRestaurantToPostgres(doc.id, doc.data());
+        syncedRestaurants++;
+      }
+      this.logger.log(`Successfully verified and synced ${syncedRestaurants} restaurants from Firebase.`);
+    } catch (err) {
+      this.logger.error('Error syncing old restaurants data:', err);
+    }
   }
 
   /**
@@ -92,6 +105,29 @@ export class FirebaseSyncService implements OnModuleInit {
         this.logger.error('Real-time listener error (users):', error);
       }
     );
+
+    // Listen to changes in the 'restaurants' collection
+    firestore.collection('restaurants').onSnapshot(
+      (snapshot) => {
+        snapshot.docChanges().forEach(async (change) => {
+          const data = change.doc.data();
+          const id = change.doc.id;
+
+          if (change.type === 'added' || change.type === 'modified') {
+            await this.syncRestaurantToPostgres(id, data);
+          } else if (change.type === 'removed') {
+            await this.prisma.restaurant.updateMany({
+              where: { firebaseId: id },
+              data: { status: AccountStatus.INACTIVE, isActive: false },
+            });
+            this.logger.log(`Real-time Sync: Restaurant ${id} marked as inactive/deleted`);
+          }
+        });
+      },
+      (error) => {
+        this.logger.error('Real-time listener error (restaurants):', error);
+      }
+    );
   }
 
   /**
@@ -116,6 +152,14 @@ export class FirebaseSyncService implements OnModuleInit {
       }
     }
 
+    let status: AccountStatus | undefined = undefined;
+    if (data.status) {
+      const s = data.status.toUpperCase();
+      if (Object.values(AccountStatus).includes(s as any)) {
+        status = s as AccountStatus;
+      }
+    }
+
     try {
       // Find by email or firebaseUid
       const existingUser = await this.prisma.user.findFirst({
@@ -135,7 +179,7 @@ export class FirebaseSyncService implements OnModuleInit {
             email: data.email,
             name: data.displayName || data.name || data.email.split('@')[0],
             role: role,
-            status: AccountStatus.ACTIVE,
+            status: status || AccountStatus.ACTIVE,
             emailVerified: true,
             authProvider: 'firebase',
             phone: data.phone || data.phoneNumber || null,
@@ -161,6 +205,7 @@ export class FirebaseSyncService implements OnModuleInit {
             firebaseUid: uid,
             // Only update role if it's admin/superadmin to avoid demoting someone accidentally
             role: (role === Role.ADMIN || (role as any) === 'SUPERADMIN') ? role : existingUser.role,
+            status: status,
             name: existingUser.name || data.displayName || data.name,
             phone: existingUser.phone || data.phone || data.phoneNumber,
             fcmTokens: fcmTokens.length > 0 ? fcmTokens : undefined,
@@ -169,6 +214,75 @@ export class FirebaseSyncService implements OnModuleInit {
       }
     } catch (error) {
       this.logger.error(`Error syncing user ${data.email} to Postgres:`, error);
+    }
+  }
+
+  /**
+   * Helper to insert or update restaurant in Postgres based on Firebase data
+   */
+  private async syncRestaurantToPostgres(firebaseId: string, data: any) {
+    if (!data.ownerId) return;
+
+    try {
+      const owner = await this.prisma.user.findFirst({
+        where: { firebaseUid: data.ownerId }
+      });
+      if (!owner) {
+        this.logger.warn(`Could not sync restaurant ${firebaseId}: Owner user with Firebase UID ${data.ownerId} not found in Postgres.`);
+        return;
+      }
+
+      let status: AccountStatus = AccountStatus.ACTIVE;
+      if (data.status) {
+        const s = data.status.toUpperCase();
+        if (s === 'ACTIVE') status = AccountStatus.ACTIVE;
+        else if (s === 'PENDING') status = AccountStatus.PENDING_VERIFICATION;
+        else if (s === 'SUSPENDED') status = AccountStatus.SUSPENDED;
+        else if (s === 'INACTIVE') status = AccountStatus.INACTIVE;
+        else if (s === 'BANNED') status = AccountStatus.BANNED;
+      } else if (data.isActive !== undefined) {
+        status = data.isActive ? AccountStatus.ACTIVE : AccountStatus.SUSPENDED;
+      }
+
+      const existingRestaurant = await this.prisma.restaurant.findFirst({
+        where: { firebaseId: firebaseId }
+      });
+
+      if (!existingRestaurant) {
+        await this.prisma.restaurant.create({
+          data: {
+            firebaseId: firebaseId,
+            ownerId: owner.id,
+            name: data.name || 'New Restaurant',
+            nameAr: data.nameAr || null,
+            status: status,
+            isActive: data.isActive !== undefined ? data.isActive : true,
+            isOpen: data.isOpen !== undefined ? data.isOpen : false,
+            vendorType: (data.vendorType || 'restaurant').toUpperCase(),
+            walletBalance: data.walletBalance || 0.0,
+            payoutPhoneNumber: data.phone || '',
+            address: data.address || '',
+          }
+        });
+        this.logger.log(`Created restaurant ${data.name} (Firebase: ${firebaseId}) in Postgres`);
+      } else {
+        await this.prisma.restaurant.update({
+          where: { id: existingRestaurant.id },
+          data: {
+            name: data.name || existingRestaurant.name,
+            nameAr: data.nameAr || existingRestaurant.nameAr,
+            status: status,
+            isActive: data.isActive !== undefined ? data.isActive : existingRestaurant.isActive,
+            isOpen: data.isOpen !== undefined ? data.isOpen : existingRestaurant.isOpen,
+            walletBalance: data.walletBalance !== undefined ? data.walletBalance : existingRestaurant.walletBalance,
+            payoutPhoneNumber: data.phone || existingRestaurant.payoutPhoneNumber,
+            address: data.address || existingRestaurant.address,
+          }
+        });
+        this.logger.log(`Updated restaurant ${data.name} (Firebase: ${firebaseId}) in Postgres`);
+      }
+    } catch (error) {
+      this.logger.error(`Error syncing restaurant ${firebaseId} to Postgres:`, error);
     }
   }
 }

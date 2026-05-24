@@ -152,10 +152,15 @@ export class FoodService {
       });
     }
 
-    return this.prisma.foodItem.findUnique({
+    const finalItem = await this.prisma.foodItem.findUnique({
       where: { id: createdItem.id },
       include: { variants: true },
     });
+
+    // Explicitly trigger a direct sync to Firestore so that all committed variants are updated
+    await this.prisma.syncFoodItemDirect(createdItem.id).catch(() => {});
+
+    return finalItem;
   }
 
   async updateFoodItem(
@@ -245,10 +250,15 @@ export class FoodService {
       }
     }
 
-    return this.prisma.foodItem.findUnique({
+    const finalItem = await this.prisma.foodItem.findUnique({
       where: { id },
       include: { variants: true },
     });
+
+    // Explicitly trigger a direct sync to Firestore so that all committed variants are updated
+    await this.prisma.syncFoodItemDirect(id).catch(() => {});
+
+    return finalItem;
   }
 
   async deleteFoodItem(id: string, ownerId: string) {

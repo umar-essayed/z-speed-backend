@@ -329,6 +329,20 @@ export class PrismaService
     }
   }
 
+  async syncFoodItemDirect(itemId: string) {
+    const admin = require('firebase-admin');
+    if (!admin.apps.length) return;
+    const db = admin.firestore();
+    if (!db) return;
+
+    const foodItem = await this.foodItem.findUnique({
+      where: { id: itemId }
+    });
+    if (foodItem) {
+      await this.syncFoodItemToFirestore(db, 'update', { model: 'FoodItem', action: 'update', args: { where: { id: itemId } } }, foodItem, null);
+    }
+  }
+
   /**
    * Soft-delete helper: sets deletedAt on a record.
    */

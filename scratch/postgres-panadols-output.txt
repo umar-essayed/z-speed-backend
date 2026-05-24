@@ -1,0 +1,18 @@
+=== SEARCHING POSTGRESQL FOR PANADOL ITEMS ===
+Found 2 panadol items in PostgreSQL:
+- Item ID: panadol-item-id
+  Name: Panadol Joint / بنادول للمفاصل | NameAr: بنادول للمفاصل
+  Price: 120 | hasFractions: true
+  Section: Medicines (ID: pharmacy-sec-1)
+  Restaurant ID: ef6a8ac3-b836-4857-af1c-b707326f4a16 | Name: Z-SPEED Premium Pharmacy | Status: ACTIVE
+  Variants count: 2
+    * Variant ID: panadol-box-var-id | Name: Box / علبة كاملة | Price: 120
+    * Variant ID: panadol-strip-var-id | Name: Strip / شريط | Price: 40
+---------------------------------------------
+- Item ID: 0b0f1202-78b9-484f-a5a9-d395825267f4
+  Name: Panadol Joint / بنادول للمفاصل | NameAr: بنادول للمفاصل
+  Price: 120 | hasFractions: false
+  Section: Medicines (ID: 5dd8b54f-402a-4063-966d-a9668e2efd5a)
+  Restaurant ID: ef6a8ac3-b836-4857-af1c-b707326f4a16 | Name: Z-SPEED Premium Pharmacy | Status: ACTIVE
+  Variants count: 0
+---------------------------------------------

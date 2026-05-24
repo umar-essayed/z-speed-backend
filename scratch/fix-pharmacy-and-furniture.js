@@ -340,9 +340,17 @@ async function main() {
   }
   await prisma.menuSection.deleteMany({ where: { restaurantId: 'ef6a8ac3-b836-4857-af1c-b707326f4a16' } });
 
-  // Delete from Firestore sections
+  // Delete from Firestore sections and menuSections
   const fsPhSections = await fsLegitPhRef.collection('sections').get();
   for (const doc of fsPhSections.docs) {
+    const fsPhItems = await doc.ref.collection('items').get();
+    for (const itemDoc of fsPhItems.docs) {
+      await itemDoc.ref.delete();
+    }
+    await doc.ref.delete();
+  }
+  const fsPhMenuSections = await fsLegitPhRef.collection('menuSections').get();
+  for (const doc of fsPhMenuSections.docs) {
     const fsPhItems = await doc.ref.collection('items').get();
     for (const itemDoc of fsPhItems.docs) {
       await itemDoc.ref.delete();
@@ -360,7 +368,7 @@ async function main() {
     create: { id: pharmaSecId, restaurantId: 'ef6a8ac3-b836-4857-af1c-b707326f4a16', name: 'Medicines', nameAr: 'الأدوية العلاجية', isActive: true, sortOrder: 0 }
   });
   // Firestore MenuSection
-  await fsLegitPhRef.collection('sections').doc(pharmaSecId).set({ id: pharmaSecId, name: 'Medicines', nameAr: 'الأدوية العلاجية', isActive: true, sortOrder: 0 });
+  await fsLegitPhRef.collection('menuSections').doc(pharmaSecId).set({ id: pharmaSecId, name: 'Medicines', nameAr: 'الأدوية العلاجية', isActive: true, sortOrder: 0 });
 
   // Postgres & Firestore Panadol
   const pharmaItemId = 'panadol-item-id';
@@ -410,9 +418,10 @@ async function main() {
     create: { id: panadolStripVarId, foodItemId: pharmaItemId, name: 'Strip / شريط', nameAr: 'شريط', price: 40.0, stockQuantity: 150, isFraction: true, fractionMultiplier: 1 }
   });
 
-  await fsLegitPhRef.collection('sections').doc(pharmaSecId).collection('items').doc(pharmaItemId).set({
+  await fsLegitPhRef.collection('menuSections').doc(pharmaSecId).collection('items').doc(pharmaItemId).set({
     id: pharmaItemId,
     sectionId: pharmaSecId,
+    restaurantId: 'ef6a8ac3-b836-4857-af1c-b707326f4a16',
     name: 'Panadol Joint / بنادول للمفاصل',
     nameAr: 'بنادول للمفاصل',
     price: 120.0,
@@ -440,9 +449,17 @@ async function main() {
   }
   await prisma.menuSection.deleteMany({ where: { restaurantId: 'furniture-test-restaurant-id' } });
 
-  // Delete from Firestore sections
+  // Delete from Firestore sections and menuSections
   const fsFuSections = await fsLegitFuRef.collection('sections').get();
   for (const doc of fsFuSections.docs) {
+    const fsFuItems = await doc.ref.collection('items').get();
+    for (const itemDoc of fsFuItems.docs) {
+      await itemDoc.ref.delete();
+    }
+    await doc.ref.delete();
+  }
+  const fsFuMenuSections = await fsLegitFuRef.collection('menuSections').get();
+  for (const doc of fsFuMenuSections.docs) {
     const fsFuItems = await doc.ref.collection('items').get();
     for (const itemDoc of fsFuItems.docs) {
       await itemDoc.ref.delete();
@@ -460,7 +477,7 @@ async function main() {
   });
 
   // Firestore Section
-  await fsLegitFuRef.collection('sections').doc(furnSecId).set({ id: furnSecId, name: 'Bedding & Mattress Covers', nameAr: 'المفروشات وأغطية المراتب', isActive: true, sortOrder: 0 });
+  await fsLegitFuRef.collection('menuSections').doc(furnSecId).set({ id: furnSecId, name: 'Bedding & Mattress Covers', nameAr: 'المفروشات وأغطية المراتب', isActive: true, sortOrder: 0 });
 
   // Postgres Mattress
   const furnItemId = 'mattress-item-id';
@@ -493,9 +510,10 @@ async function main() {
   });
 
   // Firestore Mattress
-  await fsLegitFuRef.collection('sections').doc(furnSecId).collection('items').doc(furnItemId).set({
+  await fsLegitFuRef.collection('menuSections').doc(furnSecId).collection('items').doc(furnItemId).set({
     id: furnItemId,
     sectionId: furnSecId,
+    restaurantId: 'furniture-test-restaurant-id',
     name: 'Premium Comfort Mattress / مرتبة الراحة الممتازة',
     nameAr: 'مرتبة الراحة الممتازة',
     price: 2500.0,

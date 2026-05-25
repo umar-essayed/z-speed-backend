@@ -8,6 +8,7 @@ import { SignatureUtil } from '../wallet/signature.util';
 import { Cron } from '@nestjs/schedule';
 
 import { OrdersService } from './orders.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class FirebaseSyncService implements OnModuleInit {
@@ -21,6 +22,7 @@ export class FirebaseSyncService implements OnModuleInit {
     @Inject(forwardRef(() => OrdersService))
     private readonly ordersService: OrdersService,
     private readonly stateMachine: OrderStateMachineService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   onModuleInit() {
@@ -143,7 +145,196 @@ export class FirebaseSyncService implements OnModuleInit {
       this.logger.error('Error listening to Firebase users:', error);
     });
 
-    // 9. Initial syncs are handled automatically by onSnapshot when it first attaches
+    // 9. Listen for Chats collection changes to send push notifications
+    const lastChatMsgTimeMap = new Map<string, number>();
+    firestore.collection('chats').onSnapshot(async (snapshot) => {
+      const now = Date.now();
+      for (const change of snapshot.docChanges()) {
+        const chatId = change.doc.id;
+        const data = change.doc.data();
+        if (!data || !data.lastMessageAt) continue;
+
+        const msgTime = typeof data.lastMessageAt.toMillis === 'function'
+          ? data.lastMessageAt.toMillis()
+          : new Date(data.lastMessageAt).getTime();
+
+        // Avoid triggering historical messages on startup
+        if (now - msgTime > 120000) {
+          const currentSaved = lastChatMsgTimeMap.get(chatId) || 0;
+          if (msgTime > currentSaved) {
+            lastChatMsgTimeMap.set(chatId, msgTime);
+          }
+          continue;
+        }
+
+        const lastProcessed = lastChatMsgTimeMap.get(chatId) || 0;
+        if (msgTime <= lastProcessed) {
+          continue;
+        }
+
+        lastChatMsgTimeMap.set(chatId, msgTime);
+
+        if (change.type === 'added' || change.type === 'modified') {
+          const { customerId, restaurantId, lastMessage, lastMessageSenderId, restaurantName, customerName } = data;
+          if (!lastMessageSenderId || !lastMessage) continue;
+
+          if (lastMessageSenderId === customerId) {
+            // Customer sent the message -> Recipient is the Pharmacy Owner (Vendor)
+            try {
+              const restaurant = await this.prisma.restaurant.findFirst({
+                where: { firebaseId: restaurantId },
+                select: { ownerId: true, name: true }
+              });
+
+              if (restaurant && restaurant.ownerId) {
+                this.logger.log(`Sending Chat Push Notification to Vendor (Owner of restaurant ${restaurantId})`);
+                await this.notificationsService.createNotification(
+                  restaurant.ownerId,
+                  `رسالة جديدة من ${customerName || 'العميل'}`,
+                  lastMessage,
+                  'chat',
+                  {
+                    screen: 'pharmacy_chat',
+                    chatId: chatId,
+                    requestId: '',
+                    pharmacyName: restaurant.name || restaurantName || 'الصيدلية',
+                    type: 'chat'
+                  }
+                );
+              }
+            } catch (err) {
+              this.logger.error(`Error sending chat notification to vendor: ${err.message}`);
+            }
+          } else {
+            // Pharmacy sent the message -> Recipient is the Customer
+            try {
+              const customer = await this.prisma.user.findFirst({
+                where: { firebaseUid: customerId },
+                select: { id: true }
+              });
+
+              if (customer) {
+                this.logger.log(`Sending Chat Push Notification to Customer ${customerId}`);
+                await this.notificationsService.createNotification(
+                  customer.id,
+                  `رسالة جديدة من ${restaurantName || 'الصيدلية'}`,
+                  lastMessage,
+                  'chat',
+                  {
+                    screen: 'pharmacy_chat',
+                    chatId: chatId,
+                    requestId: '',
+                    pharmacyName: restaurantName || 'الصيدلية',
+                    type: 'chat'
+                  }
+                );
+              }
+            } catch (err) {
+              this.logger.error(`Error sending chat notification to customer: ${err.message}`);
+            }
+          }
+        }
+      }
+    }, (error) => {
+      this.logger.error('Error listening to Firebase chats:', error);
+    });
+
+    // 10. Listen for Prescription Requests collection changes to send push notifications
+    const lastPrescriptionStatusMap = new Map<string, string>();
+    const lastPrescriptionTimeMap = new Map<string, number>();
+    firestore.collection('prescription_requests').onSnapshot(async (snapshot) => {
+      const now = Date.now();
+      for (const change of snapshot.docChanges()) {
+        const reqId = change.doc.id;
+        const data = change.doc.data();
+        if (!data) continue;
+
+        const updatedAtTime = data.updatedAt
+          ? (typeof data.updatedAt.toMillis === 'function' ? data.updatedAt.toMillis() : new Date(data.updatedAt).getTime())
+          : (data.createdAt ? (typeof data.createdAt.toMillis === 'function' ? data.createdAt.toMillis() : new Date(data.createdAt).getTime()) : now);
+
+        const prevStatus = lastPrescriptionStatusMap.get(reqId);
+        const currentStatus = data.status || 'pending';
+
+        if (now - updatedAtTime > 120000) {
+          lastPrescriptionStatusMap.set(reqId, currentStatus);
+          lastPrescriptionTimeMap.set(reqId, updatedAtTime);
+          continue;
+        }
+
+        const lastTime = lastPrescriptionTimeMap.get(reqId) || 0;
+        if (prevStatus === currentStatus && updatedAtTime <= lastTime) {
+          continue;
+        }
+
+        lastPrescriptionStatusMap.set(reqId, currentStatus);
+        lastPrescriptionTimeMap.set(reqId, updatedAtTime);
+
+        const { customerId, restaurantId, chatId, restaurantName, customerName } = data;
+
+        if (change.type === 'added') {
+          // A completely new prescription uploaded by customer -> Send to pharmacy owner
+          try {
+            const restaurant = await this.prisma.restaurant.findFirst({
+              where: { firebaseId: restaurantId },
+              select: { ownerId: true, name: true }
+            });
+
+            if (restaurant && restaurant.ownerId) {
+              this.logger.log(`Sending Prescription Upload Push Notification to Vendor (Owner of restaurant ${restaurantId})`);
+              await this.notificationsService.createNotification(
+                restaurant.ownerId,
+                'طلب روشتة جديد',
+                `قام العميل ${customerName || ''} برفع روشتة جديدة للمراجعة.`,
+                'prescription_new',
+                {
+                  screen: 'pharmacy_chat',
+                  chatId: chatId,
+                  requestId: reqId,
+                  pharmacyName: restaurant.name || restaurantName || 'الصيدلية',
+                  type: 'prescription_new'
+                }
+              );
+            }
+          } catch (err) {
+            this.logger.error(`Error sending prescription upload notification to vendor: ${err.message}`);
+          }
+        } else if (change.type === 'modified') {
+          // Status updated to quoted -> Send to Customer
+          if (currentStatus === 'quoted' && prevStatus !== 'quoted') {
+            try {
+              const customer = await this.prisma.user.findFirst({
+                where: { firebaseUid: customerId },
+                select: { id: true }
+              });
+
+              if (customer) {
+                this.logger.log(`Sending Prescription Quoted (Review) Push Notification to Customer ${customerId}`);
+                await this.notificationsService.createNotification(
+                  customer.id,
+                  'عرض سعر الروشتة جاهز',
+                  `تمت مراجعة وتسعير الروشتة من قبل ${restaurantName || 'الصيدلية'}. يمكنك مراجعة العرض وقبوله الآن.`,
+                  'prescription_review',
+                  {
+                    screen: 'pharmacy_chat',
+                    chatId: chatId,
+                    requestId: reqId,
+                    pharmacyName: restaurantName || 'الصيدلية',
+                    type: 'prescription_review'
+                  }
+                );
+              }
+            } catch (err) {
+              this.logger.error(`Error sending prescription quoted notification to customer: ${err.message}`);
+            }
+          }
+        }
+      }
+    }, (error) => {
+      this.logger.error('Error listening to Firebase prescription requests:', error);
+    });
+
+    // 11. Initial syncs are handled automatically by onSnapshot when it first attaches
   }
 
   private async syncOrder(doc: any, silent = false, isNew = false) {

@@ -162,6 +162,15 @@ class InMemoryRedis {
           let useFallback = false;
           const fallback = new InMemoryRedis();
 
+          // Permanent listener to catch post-connection errors gracefully and prevent uncaught crashes!
+          currentClient.on('error', (err: any) => {
+            logger.warn(`⚠️ Redis primary client emitted a runtime error: ${err.message}. Gracefully hot-swapping to In-Memory fallback.`);
+            useFallback = true;
+            try {
+              currentClient.disconnect();
+            } catch (e) {}
+          });
+
           return new Proxy(currentClient, {
             get(target, prop, receiver) {
               if (useFallback) {

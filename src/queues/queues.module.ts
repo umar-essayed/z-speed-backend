@@ -18,35 +18,41 @@ import { MailerModule } from '../mailer/mailer.module';
         const url = configService.get<string>('REDIS_URL') || configService.get<string>('REDISURL');
         const host = configService.get<string>('REDIS_HOST') || configService.get<string>('REDISHOST');
 
-        const testRedis = (opts: any, label: string): Promise<boolean> => {
-          return new Promise((resolve) => {
-            const Redis = require('ioredis');
-            let client: any;
-            try {
-              if (typeof opts === 'string') {
-                client = new Redis(opts, {
-                  maxRetriesPerRequest: 0,
-                  connectTimeout: 2000,
-                });
-              } else {
-                client = new Redis({
-                  ...opts,
-                  maxRetriesPerRequest: 0,
-                  connectTimeout: 2000,
-                });
-              }
-              client.on('ready', () => {
-                client.disconnect();
-                resolve(true);
+        const testRedis = async (opts: any, label: string): Promise<boolean> => {
+          const Redis = require('ioredis');
+          let client: any;
+          try {
+            if (typeof opts === 'string') {
+              client = new Redis(opts, {
+                maxRetriesPerRequest: 0,
+                connectTimeout: 2000,
+                enableOfflineQueue: false,
               });
-              client.on('error', (err: any) => {
-                client.disconnect();
-                resolve(false);
+            } else {
+              client = new Redis({
+                ...opts,
+                maxRetriesPerRequest: 0,
+                connectTimeout: 2000,
+                enableOfflineQueue: false,
               });
-            } catch (e) {
-              resolve(false);
             }
-          });
+
+            client.on('error', (err: any) => {
+              // Catch errors silently during connection testing
+            });
+
+            // Perform ping test to ensure connection is active and not rate-limited
+            const pong = await client.ping();
+            await client.quit().catch(() => {});
+            return pong === 'PONG';
+          } catch (e) {
+            if (client) {
+              try {
+                client.disconnect();
+              } catch (err) {}
+            }
+            return false;
+          }
         };
 
         // 1. Test REDIS_URL first

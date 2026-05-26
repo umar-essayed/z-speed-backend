@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { FirebaseAdminService } from './firebase-admin.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccountStatus, Role } from '@prisma/client';
+import { Cron, CronExpression } from '@nestjs/schedule';
 
 @Injectable()
 export class FirebaseSyncService implements OnModuleInit {
@@ -13,21 +14,19 @@ export class FirebaseSyncService implements OnModuleInit {
   ) {}
 
   onModuleInit() {
-    this.logger.log('Starting Initial Firebase Synchronization in the background...');
-    (async () => {
-      try {
-        await this.syncAllData();
-        this.setupRealtimeListeners();
-      } catch (error) {
-        this.logger.error('Failed to initialize Firebase Sync:', error);
-      }
-    })();
+    this.logger.log('Initializing Firebase real-time listeners...');
+    try {
+      this.setupRealtimeListeners();
+    } catch (error) {
+      this.logger.error('Failed to initialize Firebase real-time listeners:', error);
+    }
   }
 
   /**
-   * One-time sync of all existing data from Firebase to PostgreSQL
+   * One-time sync of all existing data from Firebase to PostgreSQL (scheduled every 12 hours at 3:00 AM and 3:00 PM)
    */
-  private async syncAllData() {
+  @Cron('0 3,15 * * *')
+  async syncAllData() {
     const firestore = this.firebaseAdmin.getFirestore();
     if (!firestore) {
       this.logger.warn('Firestore not initialized, skipping sync.');
@@ -85,9 +84,16 @@ export class FirebaseSyncService implements OnModuleInit {
     this.logger.log('Setting up real-time Firestore listeners...');
 
     // Listen to changes in the 'users' collection
+    let isUsersInitial = true;
     firestore.collection('users').onSnapshot(
       async (snapshot) => {
-        for (const change of snapshot.docChanges()) {
+        const changes = snapshot.docChanges();
+        if (isUsersInitial) {
+          isUsersInitial = false;
+          this.logger.log(`[Realtime Listener] Initial snapshot for users loaded (${changes.length} docs). Skipping historical sync on startup.`);
+          return;
+        }
+        for (const change of changes) {
           const data = change.doc.data();
           const uid = change.doc.id;
 
@@ -109,9 +115,16 @@ export class FirebaseSyncService implements OnModuleInit {
     );
 
     // Listen to changes in the 'restaurants' collection
+    let isRestaurantsInitial = true;
     firestore.collection('restaurants').onSnapshot(
       async (snapshot) => {
-        for (const change of snapshot.docChanges()) {
+        const changes = snapshot.docChanges();
+        if (isRestaurantsInitial) {
+          isRestaurantsInitial = false;
+          this.logger.log(`[Realtime Listener] Initial snapshot for restaurants loaded (${changes.length} docs). Skipping historical sync on startup.`);
+          return;
+        }
+        for (const change of changes) {
           const data = change.doc.data();
           const id = change.doc.id;
 

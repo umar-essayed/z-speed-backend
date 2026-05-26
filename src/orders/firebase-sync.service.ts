@@ -5,7 +5,7 @@ import { RealtimeGateway } from '../gateway/realtime.gateway';
 import { OrderStateMachineService } from './order-state-machine.service';
 import { OrderStatus, PaymentState, DeliveryRequestStatus } from '@prisma/client';
 import { SignatureUtil } from '../wallet/signature.util';
-import { Cron } from '@nestjs/schedule';
+import { Cron, CronExpression } from '@nestjs/schedule';
 
 import { OrdersService } from './orders.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -38,20 +38,22 @@ export class FirebaseSyncService implements OnModuleInit {
   ) {}
 
   onModuleInit() {
+    this.logger.log('Initializing Firebase real-time order listeners...');
     this.startListening();
-    // Run ALL initial syncs sequentially in background on startup (non-blocking)
-    (async () => {
-      try {
-        this.logger.log('Starting background initial sync sequentially...');
-        await this.initialSyncAddresses();
-        await this.initialSyncRestaurants();
-        await this.initialSyncDrivers();
-        await this.initialSyncMenu();
-        this.logger.log('✅ Background initial sync sequence completed successfully!');
-      } catch (err) {
-        this.logger.error('Initial sync failed:', err);
-      }
-    })();
+  }
+
+  @Cron('0 3,15 * * *')
+  async runPeriodicInitialSyncs() {
+    this.logger.log('⏰ Starting scheduled 12-hour database sync from Firebase...');
+    try {
+      await this.initialSyncAddresses();
+      await this.initialSyncRestaurants();
+      await this.initialSyncDrivers();
+      await this.initialSyncMenu();
+      this.logger.log('✅ Scheduled daily database sync completed successfully!');
+    } catch (err) {
+      this.logger.error('Scheduled daily database sync failed:', err);
+    }
   }
 
   private startListening() {
@@ -64,8 +66,15 @@ export class FirebaseSyncService implements OnModuleInit {
     this.logger.log('Started listening to ALL Firebase orders and restaurants for bidirectional sync...');
 
     // 1. Listen for new or updated orders in Firebase
+    let isOrdersInitial = true;
     firestore.collection('orders').onSnapshot(async (snapshot) => {
-      for (const change of snapshot.docChanges()) {
+      const changes = snapshot.docChanges();
+      if (isOrdersInitial) {
+        isOrdersInitial = false;
+        this.logger.log(`[Realtime Listener] Initial snapshot for orders loaded (${changes.length} docs). Skipping historical sync on startup.`);
+        return;
+      }
+      for (const change of changes) {
         const data = change.doc.data();
 
         if (change.type === 'added') {
@@ -85,8 +94,15 @@ export class FirebaseSyncService implements OnModuleInit {
     });
 
     // 2. Listen for restaurant changes in Firebase
+    let isRestaurantsInitial = true;
     firestore.collection('restaurants').onSnapshot(async (snapshot) => {
-      for (const change of snapshot.docChanges()) {
+      const changes = snapshot.docChanges();
+      if (isRestaurantsInitial) {
+        isRestaurantsInitial = false;
+        this.logger.log(`[Realtime Listener] Initial snapshot for restaurants loaded (${changes.length} docs). Skipping historical sync on startup.`);
+        return;
+      }
+      for (const change of changes) {
         await this.syncRestaurant(change.doc);
       }
     }, (error) => {
@@ -94,8 +110,15 @@ export class FirebaseSyncService implements OnModuleInit {
     });
 
     // 3. Listen for menu sections (Collection Group)
+    let isMenuSectionsInitial = true;
     firestore.collectionGroup('menuSections').onSnapshot(async (snapshot) => {
-      for (const change of snapshot.docChanges()) {
+      const changes = snapshot.docChanges();
+      if (isMenuSectionsInitial) {
+        isMenuSectionsInitial = false;
+        this.logger.log(`[Realtime Listener] Initial snapshot for menu sections loaded (${changes.length} docs). Skipping historical sync on startup.`);
+        return;
+      }
+      for (const change of changes) {
         await this.syncMenuSection(change.doc);
       }
     }, (error) => {
@@ -103,8 +126,15 @@ export class FirebaseSyncService implements OnModuleInit {
     });
 
     // 4. Listen for food items (Collection Group)
+    let isItemsInitial = true;
     firestore.collectionGroup('items').onSnapshot(async (snapshot) => {
-      for (const change of snapshot.docChanges()) {
+      const changes = snapshot.docChanges();
+      if (isItemsInitial) {
+        isItemsInitial = false;
+        this.logger.log(`[Realtime Listener] Initial snapshot for items loaded (${changes.length} docs). Skipping historical sync on startup.`);
+        return;
+      }
+      for (const change of changes) {
         await this.syncFoodItem(change.doc);
       }
     }, (error) => {
@@ -112,8 +142,15 @@ export class FirebaseSyncService implements OnModuleInit {
     });
 
     // 5. Listen for driver profiles and live locations
+    let isDriversInitial = true;
     firestore.collection('driverProfiles').onSnapshot(async (snapshot) => {
-      for (const change of snapshot.docChanges()) {
+      const changes = snapshot.docChanges();
+      if (isDriversInitial) {
+        isDriversInitial = false;
+        this.logger.log(`[Realtime Listener] Initial snapshot for driver profiles loaded (${changes.length} docs). Skipping historical sync on startup.`);
+        return;
+      }
+      for (const change of changes) {
         await this.syncDriver(change.doc);
       }
     }, (error) => {
@@ -121,8 +158,15 @@ export class FirebaseSyncService implements OnModuleInit {
     });
 
     // 6. Listen for delivery request responses (Driver accepts/rejects)
+    let isDeliveryRequestsInitial = true;
     firestore.collection('deliveryRequests').onSnapshot(async (snapshot) => {
-      for (const change of snapshot.docChanges()) {
+      const changes = snapshot.docChanges();
+      if (isDeliveryRequestsInitial) {
+        isDeliveryRequestsInitial = false;
+        this.logger.log(`[Realtime Listener] Initial snapshot for delivery requests loaded (${changes.length} docs). Skipping historical sync on startup.`);
+        return;
+      }
+      for (const change of changes) {
         const data = change.doc.data();
         if (change.type === 'modified' && data.status === 'accepted') {
           await this.handleDriverAcceptance(data);
@@ -133,8 +177,15 @@ export class FirebaseSyncService implements OnModuleInit {
     });
 
     // 7. Listen for User Addresses (Collection Group)
+    let isAddressesInitial = true;
     firestore.collectionGroup('addresses').onSnapshot(async (snapshot) => {
-      for (const change of snapshot.docChanges()) {
+      const changes = snapshot.docChanges();
+      if (isAddressesInitial) {
+        isAddressesInitial = false;
+        this.logger.log(`[Realtime Listener] Initial snapshot for user addresses loaded (${changes.length} docs). Skipping historical sync on startup.`);
+        return;
+      }
+      for (const change of changes) {
         await this.syncUserAddress(change.doc);
       }
     }, (error) => {
@@ -142,8 +193,15 @@ export class FirebaseSyncService implements OnModuleInit {
     });
 
     // 8. Listen for Users collection changes to synchronize fcmTokens to Postgres
+    let isUsersInitial = true;
     firestore.collection('users').onSnapshot(async (snapshot) => {
-      for (const change of snapshot.docChanges()) {
+      const changes = snapshot.docChanges();
+      if (isUsersInitial) {
+        isUsersInitial = false;
+        this.logger.log(`[Realtime Listener] Initial snapshot for users loaded (${changes.length} docs). Skipping historical sync on startup.`);
+        return;
+      }
+      for (const change of changes) {
         const uid = change.doc.id;
         const data = change.doc.data();
         if (data.fcmTokens && Array.isArray(data.fcmTokens)) {
@@ -164,10 +222,17 @@ export class FirebaseSyncService implements OnModuleInit {
     });
 
     // 9. Listen for Chats collection changes to send push notifications
+    let isChatsInitial = true;
     const lastChatMsgTimeMap = new Map<string, number>();
     firestore.collection('chats').onSnapshot(async (snapshot) => {
       const now = Date.now();
-      for (const change of snapshot.docChanges()) {
+      const changes = snapshot.docChanges();
+      if (isChatsInitial) {
+        isChatsInitial = false;
+        this.logger.log(`[Realtime Listener] Initial snapshot for chats loaded (${changes.length} docs). Skipping historical sync on startup.`);
+        return;
+      }
+      for (const change of changes) {
         const chatId = change.doc.id;
         const data = change.doc.data();
         if (!data || !data.lastMessageAt) continue;
@@ -1588,9 +1653,9 @@ export class FirebaseSyncService implements OnModuleInit {
     }
   }
 
-  @Cron('*/5 * * * *')
+  @Cron(CronExpression.EVERY_DAY_AT_4AM)
   async verifyAndReconcileDatabases() {
-    this.logger.log('⏰ Starting 5-minute database sync verification cron job...');
+    this.logger.log('⏰ Starting scheduled daily database reconcile cron job (4:00 AM)...');
     const firestore = this.firebaseAdmin.getFirestore();
     if (!firestore) {
       this.logger.warn('Firestore is not initialized, skipping validation cron.');

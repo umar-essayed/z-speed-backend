@@ -55,34 +55,36 @@ export class PrismaService
 
             const result = await query(args);
 
-            // Perform Firestore synchronization post-commit
-            try {
-              if (admin.apps.length) {
-                const db = admin.firestore();
-                if (db) {
-                  const action = operation;
-                  const params = { model, action, args };
+            // Perform Firestore synchronization post-commit (fire-and-forget to avoid holding DB connections)
+            setImmediate(async () => {
+              try {
+                if (admin.apps.length) {
+                  const db = admin.firestore();
+                  if (db) {
+                    const action = operation;
+                    const params = { model, action, args };
 
-                  if (model === 'Restaurant') {
-                    await self.syncRestaurantToFirestore(db, action, params, result);
-                  } else if (model === 'User') {
-                    await self.syncUserToFirestore(db, action, params, result);
-                  } else if (model === 'DriverProfile') {
-                    await self.syncDriverProfileToFirestore(db, action, params, result);
-                  } else if (model === 'MenuSection') {
-                    await self.syncMenuSectionToFirestore(db, action, params, result, preDeleteData);
-                  } else if (model === 'FoodItem') {
-                    await self.syncFoodItemToFirestore(db, action, params, result, preDeleteData);
-                  } else if (model === 'FoodItemVariant') {
-                    await self.syncFoodItemVariantToFirestore(db, action, params, result, preDeleteData);
-                  } else if (model === 'SystemConfig') {
-                    await self.syncSystemConfigToFirestore(db, action, params, result);
+                    if (model === 'Restaurant') {
+                      await self.syncRestaurantToFirestore(db, action, params, result);
+                    } else if (model === 'User') {
+                      await self.syncUserToFirestore(db, action, params, result);
+                    } else if (model === 'DriverProfile') {
+                      await self.syncDriverProfileToFirestore(db, action, params, result);
+                    } else if (model === 'MenuSection') {
+                      await self.syncMenuSectionToFirestore(db, action, params, result, preDeleteData);
+                    } else if (model === 'FoodItem') {
+                      await self.syncFoodItemToFirestore(db, action, params, result, preDeleteData);
+                    } else if (model === 'FoodItemVariant') {
+                      await self.syncFoodItemVariantToFirestore(db, action, params, result, preDeleteData);
+                    } else if (model === 'SystemConfig') {
+                      await self.syncSystemConfigToFirestore(db, action, params, result);
+                    }
                   }
                 }
+              } catch (err) {
+                self.logger.warn(`Prisma global Firestore sync failed for model ${model}: ${err.message}`);
               }
-            } catch (err) {
-              self.logger.warn(`Prisma global Firestore sync failed for model ${model}: ${err.message}`);
-            }
+            });
 
             return result;
           }

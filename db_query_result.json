@@ -1,0 +1,343 @@
+{
+  "userDoc": {
+    "email": "pharmacy@zspeedapp.com",
+    "role": "VENDOR",
+    "name": "Z-SPEED Premium Pharmacy",
+    "id": "If4718WxvAOdRpbHYPsnltSDIF93",
+    "type": "restaurant",
+    "applicationStatus": "approved",
+    "status": "active",
+    "fcmTokens": [],
+    "updatedAt": {
+      "_seconds": 1779654999,
+      "_nanoseconds": 235000000
+    }
+  },
+  "restDocByPg": {
+    "status": "ACTIVE",
+    "cuisineTypes": [
+      "Medicines"
+    ],
+    "rating": 5,
+    "deliveryFee": 15,
+    "isActive": true,
+    "image": "https://images.unsplash.com/photo-1576091160550-2173dba999ef?w=600&h=400&fit=crop",
+    "ownerId": "If4718WxvAOdRpbHYPsnltSDIF93",
+    "nameAr": "صيدلية زد سبيد الممتازة",
+    "vendorType": "pharmacy",
+    "id": "ef6a8ac3-b836-4857-af1c-b707326f4a16",
+    "name": "Z-SPEED Premium Pharmacy",
+    "address": null,
+    "city": null,
+    "coverImageUrl": "https://images.unsplash.com/photo-1576091160550-2173dba999ef?w=600&h=400&fit=crop",
+    "latitude": null,
+    "description": null,
+    "deliveryRadiusKm": null,
+    "logoUrl": "https://images.unsplash.com/photo-1576091160550-2173dba999ef?w=600&h=400&fit=crop",
+    "deliveryTimeMax": null,
+    "deliveryFeeMode": null,
+    "isOpen": true,
+    "minimumOrder": 0,
+    "deliveryTimeMin": null,
+    "longitude": null,
+    "createdAt": {
+      "_seconds": 1779653621,
+      "_nanoseconds": 265000000
+    },
+    "updatedAt": {
+      "_seconds": 1779653621,
+      "_nanoseconds": 265000000
+    }
+  },
+  "restDocByUid": {
+    "vendorType": "pharmacy",
+    "address": null,
+    "nameAr": "صيدلية زد سبيد الممتازة",
+    "city": null,
+    "coverImageUrl": null,
+    "latitude": null,
+    "description": null,
+    "deliveryRadiusKm": null,
+    "isActive": true,
+    "logoUrl": null,
+    "deliveryTimeMax": null,
+    "deliveryFee": 15,
+    "deliveryFeeMode": null,
+    "isOpen": true,
+    "minimumOrder": 0,
+    "name": "Z-SPEED Premium Pharmacy",
+    "deliveryTimeMin": null,
+    "longitude": null,
+    "updatedAt": {
+      "_seconds": 1779653700,
+      "_nanoseconds": 641000000
+    },
+    "ownerId": "If4718WxvAOdRpbHYPsnltSDIF93"
+  },
+  "debugLogDoc": {
+    "currentUser_uid": "If4718WxvAOdRpbHYPsnltSDIF93",
+    "rest_statusCode": 200,
+    "resolved_postgresId": "ef6a8ac3-b836-4857-af1c-b707326f4a16",
+    "rest_restaurants_count": 1,
+    "firestore_currentOwnerId": "If4718WxvAOdRpbHYPsnltSDIF93",
+    "has_token": true,
+    "ownerId_arg": "If4718WxvAOdRpbHYPsnltSDIF93",
+    "has_currentUser": true,
+    "currentUser_email": "pharmacy@zspeedapp.com",
+    "step": "found_firestore_doc",
+    "rest_body_preview": "[{\"id\":\"ef6a8ac3-b836-4857-af1c-b707326f4a16\",\"ownerId\":\"ea706c71-43c2-4f6d-be77-6da00f7f476b\",\"name\":\"Z-SPEED Premium Pharmacy\",\"nameAr\":\"صيدلية زد سبيد الممتازة\",\"description\":null,\"descriptionAr\":n",
+    "resolved_firebaseId": "If4718WxvAOdRpbHYPsnltSDIF93",
+    "final_resolvedId": "If4718WxvAOdRpbHYPsnltSDIF93",
+    "firestore_doc_exists": true,
+    "timestamp": {
+      "_seconds": 1779654758,
+      "_nanoseconds": 939000000
+    }
+  },
+  "pgUuidSections": [
+    {
+      "id": "otc_medicines",
+      "createdAt": {
+        "_seconds": 1779654972,
+        "_nanoseconds": 992156000
+      },
+      "nameAr": "أدوية بدون وصفة",
+      "sortOrder": 0,
+      "name": "OTC Medicines",
+      "restaurantId": "ef6a8ac3-b836-4857-af1c-b707326f4a16",
+      "isActive": true,
+      "updatedAt": {
+        "_seconds": 1779655200,
+        "_nanoseconds": 891000000
+      },
+      "items": [
+        {
+          "id": "cevitil_vit_c",
+          "isAvailable": true,
+          "nameAr": "فيتامين سي سيفيتيل",
+          "description": "Effervescent Vitamin C for immune support.",
+          "descriptionAr": "فوار فيتامين سي لدعم الجهاز المناعي.",
+          "sectionId": "otc_medicines",
+          "restaurantId": "ef6a8ac3-b836-4857-af1c-b707326f4a16",
+          "createdAt": {
+            "_seconds": 1779654972,
+            "_nanoseconds": 992156000
+          },
+          "imageUrl": "https://images.unsplash.com/photo-1616671276441-2f4c27a2122c?w=500",
+          "sortOrder": 1,
+          "name": "Cevitil Vitamin C",
+          "measureType": "piece",
+          "originalPrice": null,
+          "addons": null,
+          "fractionPrice": null,
+          "stockQuantity": 0,
+          "variants": [
+            {
+              "fractionMultiplier": null,
+              "name": "10 Effervescent Tablets",
+              "price": 40,
+              "updatedAt": {
+                "_seconds": 1779654607,
+                "_nanoseconds": 697000000
+              },
+              "id": "cevitil_10",
+              "originalPrice": null,
+              "isAvailable": true,
+              "isFraction": false,
+              "foodItemId": "90665ce4-bab5-4852-88a5-bceb1c24e3dc",
+              "nameAr": "١٠ أقراص فوارة",
+              "stockQuantity": 0
+            },
+            {
+              "name": "20 Effervescent Tablets",
+              "fractionMultiplier": null,
+              "updatedAt": {
+                "_seconds": 1779654607,
+                "_nanoseconds": 750000000
+              },
+              "id": "cevitil_20",
+              "price": 75,
+              "isFraction": false,
+              "originalPrice": null,
+              "isAvailable": true,
+              "stockQuantity": 0,
+              "foodItemId": "90665ce4-bab5-4852-88a5-bceb1c24e3dc",
+              "nameAr": "٢٠ قرص فوار"
+            }
+          ],
+          "fractionUnitName": null,
+          "fractionUnitNameAr": null,
+          "unitsPerParent": null,
+          "allergens": [],
+          "tags": [],
+          "unit": null,
+          "prepTimeMin": 10,
+          "price": 40,
+          "hasFractions": false,
+          "isOnSale": false,
+          "updatedAt": {
+            "_seconds": 1779655202,
+            "_nanoseconds": 504000000
+          }
+        },
+        {
+          "id": "panadol_joint",
+          "isAvailable": true,
+          "nameAr": "بنادول للمفاصل",
+          "description": "Effective relief for joint pain.",
+          "descriptionAr": "مسكن فعال لآلام المفاصل.",
+          "sectionId": "otc_medicines",
+          "restaurantId": "ef6a8ac3-b836-4857-af1c-b707326f4a16",
+          "createdAt": {
+            "_seconds": 1779654972,
+            "_nanoseconds": 992156000
+          },
+          "imageUrl": "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=500",
+          "sortOrder": 0,
+          "name": "Panadol Joint",
+          "isPopular": true,
+          "measureType": "piece",
+          "originalPrice": null,
+          "addons": null,
+          "fractionPrice": null,
+          "stockQuantity": 0,
+          "variants": [
+            {
+              "updatedAt": {
+                "_seconds": 1779654608,
+                "_nanoseconds": 15000000
+              },
+              "originalPrice": null,
+              "isFraction": false,
+              "name": "18 Tablets",
+              "stockQuantity": 0,
+              "fractionMultiplier": null,
+              "price": 60,
+              "nameAr": "١٨ قرص",
+              "isAvailable": true,
+              "foodItemId": "566789d3-28f9-4472-875f-f6102ee82143",
+              "id": "p_joint_18"
+            },
+            {
+              "stockQuantity": 0,
+              "isAvailable": true,
+              "fractionMultiplier": null,
+              "price": 80,
+              "nameAr": "٢٤ قرص",
+              "foodItemId": "566789d3-28f9-4472-875f-f6102ee82143",
+              "id": "p_joint_24",
+              "updatedAt": {
+                "_seconds": 1779654608,
+                "_nanoseconds": 69000000
+              },
+              "originalPrice": null,
+              "name": "24 Tablets",
+              "isFraction": false
+            }
+          ],
+          "fractionUnitName": null,
+          "fractionUnitNameAr": null,
+          "unitsPerParent": null,
+          "allergens": [],
+          "tags": [],
+          "unit": null,
+          "prepTimeMin": 10,
+          "price": 60,
+          "hasFractions": false,
+          "isOnSale": false,
+          "updatedAt": {
+            "_seconds": 1779655202,
+            "_nanoseconds": 636000000
+          }
+        }
+      ]
+    },
+    {
+      "id": "skincare",
+      "createdAt": {
+        "_seconds": 1779654972,
+        "_nanoseconds": 992156000
+      },
+      "nameAr": "العناية بالبشرة والتجميل",
+      "sortOrder": 1,
+      "name": "Skincare & Cosmetics",
+      "restaurantId": "ef6a8ac3-b836-4857-af1c-b707326f4a16",
+      "isActive": true,
+      "updatedAt": {
+        "_seconds": 1779655201,
+        "_nanoseconds": 0
+      },
+      "items": [
+        {
+          "id": "laroche_sunscreen",
+          "isAvailable": true,
+          "nameAr": "واقي شمس لاروش بوزيه",
+          "description": "High protection UVA/UVB sunscreen.",
+          "descriptionAr": "واقي شمس حماية عالية من الأشعة فوق البنفسجية.",
+          "sectionId": "skincare",
+          "restaurantId": "ef6a8ac3-b836-4857-af1c-b707326f4a16",
+          "createdAt": {
+            "_seconds": 1779654972,
+            "_nanoseconds": 992156000
+          },
+          "imageUrl": "https://images.unsplash.com/photo-1598440947619-2c35fc9aa908?w=500",
+          "sortOrder": 0,
+          "name": "Laroche-Posay Sunscreen",
+          "measureType": "piece",
+          "originalPrice": null,
+          "addons": null,
+          "fractionPrice": null,
+          "stockQuantity": 0,
+          "variants": [
+            {
+              "price": 450,
+              "stockQuantity": 0,
+              "nameAr": "سائل غير مرئي",
+              "foodItemId": "d249a309-177c-4559-9953-7e74debcf8c9",
+              "name": "Fluid Unseen",
+              "isFraction": false,
+              "id": "laroche_fluid",
+              "fractionMultiplier": null,
+              "originalPrice": null,
+              "isAvailable": true,
+              "updatedAt": {
+                "_seconds": 1779654607,
+                "_nanoseconds": 377000000
+              }
+            },
+            {
+              "price": 470,
+              "stockQuantity": 0,
+              "nameAr": "سائل ملون",
+              "foodItemId": "d249a309-177c-4559-9953-7e74debcf8c9",
+              "name": "Tinted Fluid",
+              "isFraction": false,
+              "id": "laroche_tinted",
+              "fractionMultiplier": null,
+              "originalPrice": null,
+              "isAvailable": true,
+              "updatedAt": {
+                "_seconds": 1779654607,
+                "_nanoseconds": 432000000
+              }
+            }
+          ],
+          "fractionUnitName": null,
+          "fractionUnitNameAr": null,
+          "unitsPerParent": null,
+          "allergens": [],
+          "tags": [],
+          "unit": null,
+          "prepTimeMin": 10,
+          "price": 450,
+          "hasFractions": false,
+          "isOnSale": false,
+          "updatedAt": {
+            "_seconds": 1779655202,
+            "_nanoseconds": 372000000
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -157,10 +157,61 @@ class InMemoryRedis {
           });
         };
 
+        const createResilientClientProxy = (client: any) => {
+          let currentClient = client;
+          let useFallback = false;
+          const fallback = new InMemoryRedis();
+
+          return new Proxy(currentClient, {
+            get(target, prop, receiver) {
+              if (useFallback) {
+                const val = Reflect.get(fallback, prop);
+                return typeof val === 'function' ? val.bind(fallback) : val;
+              }
+
+              const value = Reflect.get(currentClient, prop);
+              if (typeof value === 'function') {
+                return async (...args: any[]) => {
+                  if (useFallback) {
+                    return value.apply(fallback, args);
+                  }
+                  try {
+                    return await value.apply(currentClient, args);
+                  } catch (err: any) {
+                    if (
+                      err.message &&
+                      (err.message.includes('limit exceeded') ||
+                        err.message.includes('closed') ||
+                        err.message.includes('Connection') ||
+                        err.message.includes('ReplyError') ||
+                        err.message.includes('max requests'))
+                    ) {
+                      logger.error(
+                        `⚠️ Redis command failed via primary client: ${err.message}. Switching to In-Memory fallback!`,
+                      );
+                      useFallback = true;
+                      try {
+                        currentClient.disconnect();
+                      } catch (e) {}
+                      
+                      const fallbackMethod = Reflect.get(fallback, prop);
+                      if (typeof fallbackMethod === 'function') {
+                        return fallbackMethod.apply(fallback, args);
+                      }
+                    }
+                    throw err;
+                  }
+                };
+              }
+              return value;
+            },
+          });
+        };
+
         // 1. Try REDIS_URL first
         if (url) {
           const client = await tryConnect(url, 'REDIS_URL');
-          if (client) return client;
+          if (client) return createResilientClientProxy(client);
         }
 
         // 2. Try REDIS_HOST next
@@ -171,13 +222,13 @@ class InMemoryRedis {
             port: config.get<number>('REDIS_PORT', 6379),
             password: config.get<string>('REDIS_PASSWORD'),
           }, 'REDIS_HOST');
-          if (client) return client;
+          if (client) return createResilientClientProxy(client);
         }
 
         // 3. Fall back to local Redis (since local redis-server is active on localhost:6379)
         logger.log('🔄 Attempting local Redis fallback (localhost:6379)...');
         const localClient = await tryConnect({ host: 'localhost', port: 6379 }, 'Local Host Redis');
-        if (localClient) return localClient;
+        if (localClient) return createResilientClientProxy(localClient);
 
         // 4. Ultimate fallback to In-Memory Redis
         return new InMemoryRedis() as any;

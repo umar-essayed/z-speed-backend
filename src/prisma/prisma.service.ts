@@ -159,6 +159,16 @@ export class PrismaService
 
     if (result && result.id) {
       const docId = result.firebaseId || result.id;
+      
+      let fbVendorType = 'restaurant';
+      if (result.vendorType) {
+        const vt = result.vendorType.toString().toUpperCase();
+        if (vt === 'SUPERMARKET') fbVendorType = 'supermarket';
+        else if (vt === 'PHARMACY') fbVendorType = 'pharmacy';
+        else if (vt === 'BOOKSTORE') fbVendorType = 'bookstore';
+        else if (vt === 'FURNITURE' || vt === 'HOME_FURNISHING' || vt === 'HOMEFURNISHING') fbVendorType = 'homeFurnishing';
+      }
+
       const syncData: any = {
         name: result.name,
         nameAr: result.nameAr || null,
@@ -167,7 +177,9 @@ export class PrismaService
         coverImageUrl: result.coverImageUrl || null,
         isActive: result.isActive,
         isOpen: result.isOpen,
-        vendorType: result.vendorType || 'RESTAURANT',
+        vendorType: fbVendorType,
+        rating: result.rating !== undefined ? parseFloat(result.rating.toString()) : 5.0,
+        ratingCount: result.ratingCount !== undefined ? parseInt(result.ratingCount.toString(), 10) : 0,
         address: result.address || null,
         city: result.city || null,
         latitude: result.latitude || null,
@@ -203,6 +215,19 @@ export class PrismaService
 
     if (result && result.id) {
       const docId = result.firebaseUid || result.id;
+      
+      let typeStr = 'customer';
+      if (result.role) {
+        const r = result.role.toString().toUpperCase();
+        if (r === 'SUPERADMIN' || r === 'ADMIN') {
+          typeStr = 'admin';
+        } else if (r === 'VENDOR') {
+          typeStr = 'restaurant';
+        } else if (r === 'DRIVER') {
+          typeStr = 'driver';
+        }
+      }
+
       const syncData: any = {
         id: docId,
         uid: docId,
@@ -210,6 +235,7 @@ export class PrismaService
         email: result.email,
         phone: result.phone || null,
         role: (result.role || 'CUSTOMER').toLowerCase(),
+        type: typeStr,
         status: (result.status || 'ACTIVE').toLowerCase(),
         walletBalance: result.walletBalance || 0.0,
         updatedAt: new Date(),

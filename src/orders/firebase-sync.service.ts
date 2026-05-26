@@ -10,6 +10,18 @@ import { Cron } from '@nestjs/schedule';
 import { OrdersService } from './orders.service';
 import { NotificationsService } from '../notifications/notifications.service';
 
+const safeParseFloat = (val: any, fallback: number | null = null): number | null => {
+  if (val === undefined || val === null || val === '') return fallback;
+  const parsed = parseFloat(val.toString());
+  return isNaN(parsed) ? fallback : parsed;
+};
+
+const safeParseInt = (val: any, fallback: number | null = null): number | null => {
+  if (val === undefined || val === null || val === '') return fallback;
+  const parsed = parseInt(val.toString(), 10);
+  return isNaN(parsed) ? fallback : parsed;
+};
+
 @Injectable()
 export class FirebaseSyncService implements OnModuleInit {
   private readonly logger = new Logger(FirebaseSyncService.name);
@@ -25,15 +37,17 @@ export class FirebaseSyncService implements OnModuleInit {
     private readonly notificationsService: NotificationsService,
   ) {}
 
-  onModuleInit() {
+  async onModuleInit() {
     this.startListening();
-    // Run ALL initial syncs in background on startup
-    Promise.all([
-      this.initialSyncAddresses(),
-      this.initialSyncRestaurants(),
-      this.initialSyncDrivers(),
-      this.initialSyncMenu(),
-    ]).catch(err => this.logger.error('Initial sync failed:', err));
+    // Run ALL initial syncs sequentially in background on startup to prevent pool exhaustion
+    try {
+      await this.initialSyncAddresses();
+      await this.initialSyncRestaurants();
+      await this.initialSyncDrivers();
+      await this.initialSyncMenu();
+    } catch (err) {
+      this.logger.error('Initial sync failed:', err);
+    }
   }
 
   private startListening() {
@@ -614,14 +628,14 @@ export class FirebaseSyncService implements OnModuleInit {
           vendorType: data.vendorType || 'restaurant',
           address: data.address || null,
           city: data.city || null,
-          latitude: data.latitude !== undefined ? parseFloat(data.latitude.toString()) : null,
-          longitude: data.longitude !== undefined ? parseFloat(data.longitude.toString()) : null,
-          deliveryRadiusKm: data.deliveryRadiusKm !== undefined ? parseFloat(data.deliveryRadiusKm.toString()) : null,
-          deliveryTimeMin: data.deliveryTimeMin !== undefined ? parseInt(data.deliveryTimeMin.toString()) : null,
-          deliveryTimeMax: data.deliveryTimeMax !== undefined ? parseInt(data.deliveryTimeMax.toString()) : null,
+          latitude: safeParseFloat(data.latitude),
+          longitude: safeParseFloat(data.longitude),
+          deliveryRadiusKm: safeParseFloat(data.deliveryRadiusKm),
+          deliveryTimeMin: safeParseInt(data.deliveryTimeMin),
+          deliveryTimeMax: safeParseInt(data.deliveryTimeMax),
           deliveryFeeMode: data.deliveryFeeMode || null,
-          deliveryFee: data.deliveryFee !== undefined ? parseFloat(data.deliveryFee.toString()) : 0.0,
-          minimumOrder: data.minimumOrder !== undefined ? parseFloat(data.minimumOrder.toString()) : 0.0,
+          deliveryFee: safeParseFloat(data.deliveryFee, 0.0)!,
+          minimumOrder: safeParseFloat(data.minimumOrder, 0.0)!,
           deliveryFeeFormula: data.deliveryFeeFormula || null,
           deliveryFeeTiers: data.deliveryFeeTiers || null,
         },
@@ -638,14 +652,14 @@ export class FirebaseSyncService implements OnModuleInit {
           vendorType: data.vendorType || 'restaurant',
           address: data.address || null,
           city: data.city || null,
-          latitude: data.latitude !== undefined ? parseFloat(data.latitude.toString()) : null,
-          longitude: data.longitude !== undefined ? parseFloat(data.longitude.toString()) : null,
-          deliveryRadiusKm: data.deliveryRadiusKm !== undefined ? parseFloat(data.deliveryRadiusKm.toString()) : null,
-          deliveryTimeMin: data.deliveryTimeMin !== undefined ? parseInt(data.deliveryTimeMin.toString()) : null,
-          deliveryTimeMax: data.deliveryTimeMax !== undefined ? parseInt(data.deliveryTimeMax.toString()) : null,
+          latitude: safeParseFloat(data.latitude),
+          longitude: safeParseFloat(data.longitude),
+          deliveryRadiusKm: safeParseFloat(data.deliveryRadiusKm),
+          deliveryTimeMin: safeParseInt(data.deliveryTimeMin),
+          deliveryTimeMax: safeParseInt(data.deliveryTimeMax),
           deliveryFeeMode: data.deliveryFeeMode || null,
-          deliveryFee: data.deliveryFee !== undefined ? parseFloat(data.deliveryFee.toString()) : 0.0,
-          minimumOrder: data.minimumOrder !== undefined ? parseFloat(data.minimumOrder.toString()) : 0.0,
+          deliveryFee: safeParseFloat(data.deliveryFee, 0.0)!,
+          minimumOrder: safeParseFloat(data.minimumOrder, 0.0)!,
           deliveryFeeFormula: data.deliveryFeeFormula || null,
           deliveryFeeTiers: data.deliveryFeeTiers || null,
           status: 'ACTIVE',
@@ -922,7 +936,7 @@ export class FirebaseSyncService implements OnModuleInit {
         phone: data.phone || data.phoneNumber || null,
         role: 'DRIVER' as any,
         profileImage: data.profileImage || data.imageUrl || null,
-        walletBalance: data.walletBalance !== undefined ? parseFloat(data.walletBalance.toString()) : 0.0,
+        walletBalance: safeParseFloat(data.walletBalance, 0.0)!,
       };
 
       if (!user) {
@@ -941,7 +955,7 @@ export class FirebaseSyncService implements OnModuleInit {
             name: userData.name,
             phone: userData.phone,
             profileImage: userData.profileImage,
-            walletBalance: data.walletBalance !== undefined ? parseFloat(data.walletBalance.toString()) : undefined,
+            walletBalance: safeParseFloat(data.walletBalance, undefined)!,
           }
         });
       }
@@ -955,8 +969,8 @@ export class FirebaseSyncService implements OnModuleInit {
       const profile = await this.prisma.driverProfile.upsert({
         where: { userId: user.id },
         update: {
-          currentLat: lat ? parseFloat(lat.toString()) : null,
-          currentLng: lng ? parseFloat(lng.toString()) : null,
+          currentLat: safeParseFloat(lat),
+          currentLng: safeParseFloat(lng),
           isAvailable: isOnline,
           rating: data.rating || 5.0,
           totalTrips: data.totalTrips || 0,
@@ -967,8 +981,8 @@ export class FirebaseSyncService implements OnModuleInit {
         },
         create: {
           userId: user.id,
-          currentLat: lat ? parseFloat(lat.toString()) : null,
-          currentLng: lng ? parseFloat(lng.toString()) : null,
+          currentLat: safeParseFloat(lat),
+          currentLng: safeParseFloat(lng),
           isAvailable: isOnline,
           rating: data.rating || 5.0,
           totalTrips: data.totalTrips || 0,

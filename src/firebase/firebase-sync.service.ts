@@ -84,8 +84,8 @@ export class FirebaseSyncService implements OnModuleInit {
 
     // Listen to changes in the 'users' collection
     firestore.collection('users').onSnapshot(
-      (snapshot) => {
-        snapshot.docChanges().forEach(async (change) => {
+      async (snapshot) => {
+        for (const change of snapshot.docChanges()) {
           const data = change.doc.data();
           const uid = change.doc.id;
 
@@ -99,7 +99,7 @@ export class FirebaseSyncService implements OnModuleInit {
             });
             this.logger.log(`Real-time Sync: User ${uid} marked as deleted/banned`);
           }
-        });
+        }
       },
       (error) => {
         this.logger.error('Real-time listener error (users):', error);
@@ -108,8 +108,8 @@ export class FirebaseSyncService implements OnModuleInit {
 
     // Listen to changes in the 'restaurants' collection
     firestore.collection('restaurants').onSnapshot(
-      (snapshot) => {
-        snapshot.docChanges().forEach(async (change) => {
+      async (snapshot) => {
+        for (const change of snapshot.docChanges()) {
           const data = change.doc.data();
           const id = change.doc.id;
 
@@ -122,7 +122,7 @@ export class FirebaseSyncService implements OnModuleInit {
             });
             this.logger.log(`Real-time Sync: Restaurant ${id} marked as inactive/deleted`);
           }
-        });
+        }
       },
       (error) => {
         this.logger.error('Real-time listener error (restaurants):', error);

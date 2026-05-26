@@ -98,12 +98,16 @@ export class FirebaseSyncService implements OnModuleInit {
           const uid = change.doc.id;
 
           if (change.type === 'added' || change.type === 'modified') {
-            await this.syncUserToPostgres(uid, data);
+            await this.prisma.runWithBypassSync(async () => {
+              await this.syncUserToPostgres(uid, data);
+            });
             this.logger.log(`Real-time Sync: User ${uid} updated from Firebase`);
           } else if (change.type === 'removed') {
-            await this.prisma.user.updateMany({
-              where: { firebaseUid: uid },
-              data: { status: AccountStatus.BANNED, deletedAt: new Date() },
+            await this.prisma.runWithBypassSync(async () => {
+              await this.prisma.user.updateMany({
+                where: { firebaseUid: uid },
+                data: { status: AccountStatus.BANNED, deletedAt: new Date() },
+              });
             });
             this.logger.log(`Real-time Sync: User ${uid} marked as deleted/banned`);
           }
@@ -129,11 +133,15 @@ export class FirebaseSyncService implements OnModuleInit {
           const id = change.doc.id;
 
           if (change.type === 'added' || change.type === 'modified') {
-            await this.syncRestaurantToPostgres(id, data);
+            await this.prisma.runWithBypassSync(async () => {
+              await this.syncRestaurantToPostgres(id, data);
+            });
           } else if (change.type === 'removed') {
-            await this.prisma.restaurant.updateMany({
-              where: { firebaseId: id },
-              data: { status: AccountStatus.INACTIVE, isActive: false },
+            await this.prisma.runWithBypassSync(async () => {
+              await this.prisma.restaurant.updateMany({
+                where: { firebaseId: id },
+                data: { status: AccountStatus.INACTIVE, isActive: false },
+              });
             });
             this.logger.log(`Real-time Sync: Restaurant ${id} marked as inactive/deleted`);
           }
@@ -277,6 +285,8 @@ export class FirebaseSyncService implements OnModuleInit {
             walletBalance: data.walletBalance || 0.0,
             payoutPhoneNumber: data.phone || '',
             address: data.address || '',
+            logoUrl: data.logoUrl || data.image || data.imageUrl || data.logo || null,
+            coverImageUrl: data.coverImageUrl || data.coverImage || data.image || data.imageUrl || null,
           }
         });
         this.logger.log(`Created restaurant ${data.name} (Firebase: ${firebaseId}) in Postgres`);
@@ -292,6 +302,8 @@ export class FirebaseSyncService implements OnModuleInit {
             walletBalance: data.walletBalance !== undefined ? data.walletBalance : existingRestaurant.walletBalance,
             payoutPhoneNumber: data.phone || existingRestaurant.payoutPhoneNumber,
             address: data.address || existingRestaurant.address,
+            logoUrl: data.logoUrl || data.image || data.imageUrl || data.logo || existingRestaurant.logoUrl,
+            coverImageUrl: data.coverImageUrl || data.coverImage || data.image || data.imageUrl || existingRestaurant.coverImageUrl,
           }
         });
         this.logger.log(`Updated restaurant ${data.name} (Firebase: ${firebaseId}) in Postgres`);

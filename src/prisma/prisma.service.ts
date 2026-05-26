@@ -378,6 +378,7 @@ export class PrismaService
         isOnSale: result.isOnSale,
         isAvailable: result.isAvailable,
         stockQuantity: result.stockQuantity,
+        sortOrder: 0,
         hasFractions: result.hasFractions,
         fractionUnitName: result.fractionUnitName || null,
         fractionUnitNameAr: result.fractionUnitNameAr || null,

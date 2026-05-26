@@ -131,8 +131,9 @@ async function main() {
   });
   console.log(`✅ Verified database Vendor user: ${dbUser.email} (ID: ${dbUser.id})`);
 
-  // Fixed Restaurant ID for test consistency
-  const restaurantId = 'furniture-test-restaurant-id';
+  // Fixed Restaurant IDs for test consistency
+  const restaurantId = 'f070e51d-d245-42bb-a987-c54d39ec9a5e'; // Postgres UUID
+  const firebaseRestaurantId = 'furniture-test-restaurant-id'; // Firebase Document ID
 
   // 3. Create/Upsert restaurant in PostgreSQL
   const restaurant = await prisma.restaurant.upsert({
@@ -160,7 +161,7 @@ async function main() {
       deliveryFee: 25.0,
       minimumOrder: 100.0,
       autoAcceptOrders: true,
-      firebaseId: restaurantId,
+      firebaseId: firebaseRestaurantId,
     },
     create: {
       id: restaurantId,
@@ -171,7 +172,7 @@ async function main() {
       descriptionAr: 'منصتك الفاخرة لأغطية الأسرة، الوسائد الطبية العلاجية، الألحفة، ومستلزمات الديكور المنزلي.',
       logoUrl: 'https://images.unsplash.com/photo-1524758631624-e2822e304c36?w=200&h=200&fit=crop',
       coverImageUrl: 'https://images.unsplash.com/photo-1616486338812-3dadae4b4ace?w=1000&h=400&fit=crop',
-      firebaseId: restaurantId,
+      firebaseId: firebaseRestaurantId,
       isOpen: true,
       isActive: true,
       status: AccountStatus.ACTIVE,
@@ -201,7 +202,7 @@ async function main() {
   console.log(`✅ Verified database Bookstore store: ${restaurant.name} (ID: ${restaurant.id})`);
 
   // 4. Create/Sync Furniture storefront to Firestore
-  await db.collection('restaurants').doc(restaurantId).set({
+  await db.collection('restaurants').doc(firebaseRestaurantId).set({
     ownerId: dbUser.id,
     name: 'Z-Home Furnishings & Bedding',
     nameAr: 'زد هوم للأثاث والمفروشات',
@@ -228,7 +229,7 @@ async function main() {
     reviewsCount: 0,
     updatedAt: new Date(),
   }, { merge: true });
-  console.log(`✅ Synced Storefront to Firestore ('restaurants/${restaurantId}')`);
+  console.log(`✅ Synced Storefront to Firestore ('restaurants/${firebaseRestaurantId}')`);
 
   // 5. Create Menu Sections (Default Categories)
   const sectionsData = [
@@ -262,10 +263,10 @@ async function main() {
     sectionsSqlIds[sec.name] = dbSec.id;
 
     // Create in Firestore
-    await db.collection('restaurants').doc(restaurantId)
+    await db.collection('restaurants').doc(firebaseRestaurantId)
       .collection('menuSections').doc(sec.id).set({
         id: sec.id,
-        restaurantId: restaurantId,
+        restaurantId: firebaseRestaurantId,
         name: sec.name,
         nameAr: sec.nameAr,
         sortOrder: sec.sortOrder,
@@ -418,12 +419,12 @@ async function main() {
     });
 
     // Firestore Sync
-    await db.collection('restaurants').doc(restaurantId)
+    await db.collection('restaurants').doc(firebaseRestaurantId)
       .collection('menuSections').doc(prod.sectionId)
       .collection('items').doc(prod.id).set({
         id: prod.id,
         sectionId: prod.sectionId,
-        restaurantId: restaurantId,
+        restaurantId: firebaseRestaurantId,
         name: prod.name,
         nameAr: prod.nameAr,
         price: prod.price,

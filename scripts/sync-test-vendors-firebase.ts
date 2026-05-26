@@ -165,17 +165,17 @@ async function main() {
 
       // 5. Update PostgreSQL Restaurant Owner reference
       try {
-        const dbRest = await prisma.restaurant.findUnique({
-          where: { id: vendor.restaurantId },
+        const dbRest = await prisma.restaurant.findFirst({
+          where: { firebaseId: vendor.restaurantId },
         });
         if (dbRest) {
           await prisma.restaurant.update({
-            where: { id: vendor.restaurantId },
+            where: { id: dbRest.id },
             data: { ownerId: dbUser.id },
           });
           console.log(`✅ Updated PostgreSQL Restaurant ownerId reference to User ID: ${dbUser.id}`);
         } else {
-          console.log(`⚠️ PostgreSQL Restaurant ID: ${vendor.restaurantId} not found in DB`);
+          console.log(`⚠️ PostgreSQL Restaurant with firebaseId: ${vendor.restaurantId} not found in DB`);
         }
       } catch (err: any) {
         console.warn(`⚠️ Warning updating PostgreSQL Restaurant ownerId: ${err.message}`);

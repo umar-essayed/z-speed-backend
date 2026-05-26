@@ -143,7 +143,7 @@ class InMemoryRedis {
                 });
               }
 
-              client.on('connect', handleSuccess);
+              client.on('ready', handleSuccess);
               client.on('error', handleFailure);
               
               // Fallback timeout in case events are not captured

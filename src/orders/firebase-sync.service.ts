@@ -37,17 +37,21 @@ export class FirebaseSyncService implements OnModuleInit {
     private readonly notificationsService: NotificationsService,
   ) {}
 
-  async onModuleInit() {
+  onModuleInit() {
     this.startListening();
-    // Run ALL initial syncs sequentially in background on startup to prevent pool exhaustion
-    try {
-      await this.initialSyncAddresses();
-      await this.initialSyncRestaurants();
-      await this.initialSyncDrivers();
-      await this.initialSyncMenu();
-    } catch (err) {
-      this.logger.error('Initial sync failed:', err);
-    }
+    // Run ALL initial syncs sequentially in background on startup (non-blocking)
+    (async () => {
+      try {
+        this.logger.log('Starting background initial sync sequentially...');
+        await this.initialSyncAddresses();
+        await this.initialSyncRestaurants();
+        await this.initialSyncDrivers();
+        await this.initialSyncMenu();
+        this.logger.log('✅ Background initial sync sequence completed successfully!');
+      } catch (err) {
+        this.logger.error('Initial sync failed:', err);
+      }
+    })();
   }
 
   private startListening() {

@@ -12,14 +12,16 @@ export class FirebaseSyncService implements OnModuleInit {
     private readonly prisma: PrismaService,
   ) {}
 
-  async onModuleInit() {
-    this.logger.log('Starting Initial Firebase Synchronization...');
-    try {
-      await this.syncAllData();
-      this.setupRealtimeListeners();
-    } catch (error) {
-      this.logger.error('Failed to initialize Firebase Sync:', error);
-    }
+  onModuleInit() {
+    this.logger.log('Starting Initial Firebase Synchronization in the background...');
+    (async () => {
+      try {
+        await this.syncAllData();
+        this.setupRealtimeListeners();
+      } catch (error) {
+        this.logger.error('Failed to initialize Firebase Sync:', error);
+      }
+    })();
   }
 
   /**

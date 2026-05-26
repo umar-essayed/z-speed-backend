@@ -6,7 +6,10 @@ import {
   IsBoolean,
   IsInt,
   IsArray,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
+
 
 export class CreateFoodItemDto {
   @IsString()
@@ -85,3 +88,11 @@ export class CreateFoodItemDto {
   @IsOptional()
   variants?: any[];
 }
+
+export class BulkCreateFoodItemsDto {
+  @ValidateNested({ each: true })
+  @Type(() => CreateFoodItemDto)
+  @IsArray()
+  items: CreateFoodItemDto[];
+}
+

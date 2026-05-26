@@ -14,7 +14,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { ParseUUIDPipe } from '../common/pipes/parse-uuid.pipe';
-import { CreateMenuSectionDto, CreateFoodItemDto } from './dto';
+import { CreateMenuSectionDto, CreateFoodItemDto, BulkCreateFoodItemsDto } from './dto';
 import { Get, Query } from '@nestjs/common';
 
 @Controller('food')
@@ -89,6 +89,15 @@ export class FoodController {
   ) {
     return this.foodService.createFoodItem(userId, dto);
   }
+
+  @Post('food-items/bulk')
+  async createFoodItemsBulk(
+    @CurrentUser('userId') userId: string,
+    @Body() body: BulkCreateFoodItemsDto,
+  ) {
+    return this.foodService.createFoodItemsBulk(userId, body.items);
+  }
+
 
   @Patch('food-items/:id')
   async updateFoodItem(

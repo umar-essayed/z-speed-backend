@@ -163,6 +163,196 @@ export class FoodService {
     return finalItem;
   }
 
+  async createFoodItemsBulk(ownerId: string, dtos: CreateFoodItemDto[]) {
+    // 1. Group sections and verify ownership
+    const sectionIds = Array.from(new Set(dtos.map(d => d.sectionId)));
+    
+    for (const sectionId of sectionIds) {
+      const section = await this.prisma.menuSection.findUnique({
+        where: { id: sectionId },
+        include: { restaurant: true },
+      });
+      if (!section) throw new NotFoundException(`Menu section ${sectionId} not found`);
+      if (section.restaurant.ownerId !== ownerId) {
+        throw new ForbiddenException('Not your restaurant');
+      }
+    }
+
+    const results: any[] = [];
+    
+    // 2. Insert items and their variants in a transaction
+    await this.prisma.$transaction(async (tx) => {
+      for (const dto of dtos) {
+        const { variants, ...itemData } = dto;
+        const createdItem = await tx.foodItem.create({
+          data: {
+            sectionId: itemData.sectionId,
+            name: itemData.name,
+            nameAr: itemData.nameAr,
+            price: itemData.price,
+            description: itemData.description,
+            descriptionAr: itemData.descriptionAr,
+            imageUrl: itemData.imageUrl,
+            originalPrice: itemData.originalPrice,
+            isOnSale: itemData.isOnSale ?? false,
+            prepTimeMin: itemData.prepTimeMin ?? 10,
+            allergens: itemData.allergens ?? [],
+            addons: itemData.addons,
+            hasFractions: itemData.hasFractions ?? false,
+            fractionUnitName: itemData.fractionUnitName,
+            fractionUnitNameAr: itemData.fractionUnitNameAr,
+            unitsPerParent: itemData.unitsPerParent,
+            fractionPrice: itemData.fractionPrice,
+          },
+        });
+
+        if (createdItem.hasFractions && createdItem.unitsPerParent) {
+          const units = createdItem.unitsPerParent;
+          const calculatedStripPrice = createdItem.fractionPrice || Number((createdItem.price / units).toFixed(2));
+          
+          const boxName = 'Box';
+          const boxNameAr = 'علبة كاملة';
+          const stripName = createdItem.fractionUnitName || 'Strip';
+          const stripNameAr = createdItem.fractionUnitNameAr || 'شريط';
+
+          await tx.foodItemVariant.createMany({
+            data: [
+              {
+                foodItemId: createdItem.id,
+                name: boxName,
+                nameAr: boxNameAr,
+                price: createdItem.price,
+                originalPrice: createdItem.originalPrice,
+                stockQuantity: createdItem.stockQuantity,
+                isFraction: false,
+                fractionMultiplier: units,
+              },
+              {
+                foodItemId: createdItem.id,
+                name: stripName,
+                nameAr: stripNameAr,
+                price: calculatedStripPrice,
+                isFraction: true,
+                fractionMultiplier: 1,
+              }
+            ],
+          });
+        } else if (variants && variants.length > 0) {
+          await tx.foodItemVariant.createMany({
+            data: variants.map((v: any) => ({
+              foodItemId: createdItem.id,
+              name: v.name,
+              nameAr: v.nameAr,
+              price: Number(v.price),
+              originalPrice: v.originalPrice ? Number(v.originalPrice) : null,
+              stockQuantity: v.stockQuantity ? Number(v.stockQuantity) : 0,
+              isAvailable: v.isAvailable ?? true,
+              isFraction: v.isFraction ?? false,
+              fractionMultiplier: v.fractionMultiplier ? Number(v.fractionMultiplier) : null,
+            })),
+          });
+        }
+
+        results.push(createdItem);
+      }
+    });
+
+    // 3. Sync all items to Firestore in bulk
+    const admin = require('firebase-admin');
+    if (admin.apps.length) {
+      const db = admin.firestore();
+      if (db) {
+        // Group menuSection queries to avoid redundant DB reads
+        const sectionMap = new Map();
+        for (const sectionId of sectionIds) {
+          const section = await this.prisma.menuSection.findUnique({
+            where: { id: sectionId },
+            select: { 
+              restaurantId: true, 
+              firebaseId: true,
+              restaurant: { select: { firebaseId: true } }
+            }
+          }).catch(() => null);
+          if (section) {
+            sectionMap.set(sectionId, section);
+          }
+        }
+
+        const batchSize = 500;
+        for (let i = 0; i < results.length; i += batchSize) {
+          const chunk = results.slice(i, i + batchSize);
+          const firestoreBatch = db.batch();
+          
+          for (const item of chunk) {
+            const section = sectionMap.get(item.sectionId);
+            const restaurantId = section?.restaurantId;
+            if (!restaurantId) continue;
+
+            const firestoreRestaurantId = section?.restaurant?.firebaseId || restaurantId;
+            const firestoreSectionId = section?.firebaseId || item.sectionId;
+
+            const variants = await this.prisma.foodItemVariant.findMany({
+              where: { foodItemId: item.id }
+            }).catch(() => []);
+
+            const syncData: any = {
+              id: item.id,
+              sectionId: firestoreSectionId,
+              restaurantId: firestoreRestaurantId,
+              name: item.name,
+              nameAr: item.nameAr || null,
+              description: item.description || null,
+              descriptionAr: item.descriptionAr || null,
+              imageUrl: item.imageUrl || null,
+              price: item.price,
+              originalPrice: item.originalPrice || null,
+              isOnSale: item.isOnSale,
+              isAvailable: item.isAvailable,
+              stockQuantity: item.stockQuantity,
+              hasFractions: item.hasFractions,
+              fractionUnitName: item.fractionUnitName || null,
+              fractionUnitNameAr: item.fractionUnitNameAr || null,
+              unitsPerParent: item.unitsPerParent || null,
+              fractionPrice: item.fractionPrice || null,
+              addons: item.addons || null,
+              allergens: item.allergens || [],
+              prepTimeMin: item.prepTimeMin ?? 10,
+              unit: item.unit || null,
+              tags: item.tags || [],
+              updatedAt: new Date(),
+              variants: variants.map(v => ({
+                id: v.firebaseId || v.id,
+                foodItemId: v.foodItemId,
+                name: v.name,
+                nameAr: v.nameAr || null,
+                price: v.price,
+                originalPrice: v.originalPrice || null,
+                stockQuantity: v.stockQuantity,
+                isAvailable: v.isAvailable,
+                isFraction: v.isFraction,
+                fractionMultiplier: v.fractionMultiplier || null,
+                updatedAt: v.updatedAt
+              }))
+            };
+
+            const docRef = db.collection('restaurants').doc(firestoreRestaurantId)
+              .collection('menuSections').doc(firestoreSectionId)
+              .collection('items').doc(item.id);
+            
+            firestoreBatch.set(docRef, syncData, { merge: true });
+          }
+          
+          await firestoreBatch.commit().catch((err: any) => {
+            this.logger.error(`Failed to commit bulk firestore sync: ${err.message}`);
+          });
+        }
+      }
+    }
+
+    return { count: results.length };
+  }
+
+
   async updateFoodItem(
     id: string,
     ownerId: string,

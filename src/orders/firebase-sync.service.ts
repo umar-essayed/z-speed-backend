@@ -75,19 +75,21 @@ export class FirebaseSyncService implements OnModuleInit {
         return;
       }
       for (const change of changes) {
-        const data = change.doc.data();
+        await this.prisma.runWithBypassSync(async () => {
+          const data = change.doc.data();
 
-        if (change.type === 'added') {
-          // isNew=true only for orders not yet synced to Postgres (genuine new orders)
-          const isNew = !data.syncedToPostgres;
-          await this.syncOrder(change.doc, !isNew, isNew);
-        } else if (change.type === 'modified') {
-          if (!data.syncedToPostgres) {
-            await this.syncOrder(change.doc, false, false);
-          } else if (data.postgresOrderId) {
-            await this.syncStatusFromFirebase(change.doc);
+          if (change.type === 'added') {
+            // isNew=true only for orders not yet synced to Postgres (genuine new orders)
+            const isNew = !data.syncedToPostgres;
+            await this.syncOrder(change.doc, !isNew, isNew);
+          } else if (change.type === 'modified') {
+            if (!data.syncedToPostgres) {
+              await this.syncOrder(change.doc, false, false);
+            } else if (data.postgresOrderId) {
+              await this.syncStatusFromFirebase(change.doc);
+            }
           }
-        }
+        });
       }
     }, (error) => {
       this.logger.error('Error listening to Firebase orders:', error);
@@ -103,7 +105,9 @@ export class FirebaseSyncService implements OnModuleInit {
         return;
       }
       for (const change of changes) {
-        await this.syncRestaurant(change.doc);
+        await this.prisma.runWithBypassSync(async () => {
+          await this.syncRestaurant(change.doc);
+        });
       }
     }, (error) => {
       this.logger.error('Error listening to Firebase restaurants:', error);
@@ -119,7 +123,17 @@ export class FirebaseSyncService implements OnModuleInit {
         return;
       }
       for (const change of changes) {
-        await this.syncMenuSection(change.doc);
+        await this.prisma.runWithBypassSync(async () => {
+          if (change.type === 'removed') {
+            const fbSectionId = change.doc.id;
+            this.logger.log(`[Realtime Sync] Menu section removed in Firestore: ${fbSectionId}. Deleting from Postgres.`);
+            await this.prisma.menuSection.deleteMany({
+              where: { firebaseId: fbSectionId }
+            }).catch(err => this.logger.error(`Error deleting menu section ${fbSectionId}: ${err.message}`));
+          } else {
+            await this.syncMenuSection(change.doc);
+          }
+        });
       }
     }, (error) => {
       this.logger.error('Error listening to Firebase menu sections:', error);
@@ -135,7 +149,17 @@ export class FirebaseSyncService implements OnModuleInit {
         return;
       }
       for (const change of changes) {
-        await this.syncFoodItem(change.doc);
+        await this.prisma.runWithBypassSync(async () => {
+          if (change.type === 'removed') {
+            const fbItemId = change.doc.id;
+            this.logger.log(`[Realtime Sync] Food item removed in Firestore: ${fbItemId}. Deleting from Postgres.`);
+            await this.prisma.foodItem.deleteMany({
+              where: { firebaseId: fbItemId }
+            }).catch(err => this.logger.error(`Error deleting food item ${fbItemId}: ${err.message}`));
+          } else {
+            await this.syncFoodItem(change.doc);
+          }
+        });
       }
     }, (error) => {
       this.logger.error('Error listening to Firebase food items:', error);
@@ -151,7 +175,9 @@ export class FirebaseSyncService implements OnModuleInit {
         return;
       }
       for (const change of changes) {
-        await this.syncDriver(change.doc);
+        await this.prisma.runWithBypassSync(async () => {
+          await this.syncDriver(change.doc);
+        });
       }
     }, (error) => {
       this.logger.error('Error listening to Firebase driver profiles:', error);
@@ -167,10 +193,12 @@ export class FirebaseSyncService implements OnModuleInit {
         return;
       }
       for (const change of changes) {
-        const data = change.doc.data();
-        if (change.type === 'modified' && data.status === 'accepted') {
-          await this.handleDriverAcceptance(data);
-        }
+        await this.prisma.runWithBypassSync(async () => {
+          const data = change.doc.data();
+          if (change.type === 'modified' && data.status === 'accepted') {
+            await this.handleDriverAcceptance(data);
+          }
+        });
       }
     }, (error) => {
       this.logger.error('Error listening to Firebase delivery requests:', error);
@@ -186,7 +214,9 @@ export class FirebaseSyncService implements OnModuleInit {
         return;
       }
       for (const change of changes) {
-        await this.syncUserAddress(change.doc);
+        await this.prisma.runWithBypassSync(async () => {
+          await this.syncUserAddress(change.doc);
+        });
       }
     }, (error) => {
       this.logger.error('Error listening to Firebase user addresses:', error);
@@ -202,20 +232,22 @@ export class FirebaseSyncService implements OnModuleInit {
         return;
       }
       for (const change of changes) {
-        const uid = change.doc.id;
-        const data = change.doc.data();
-        if (data.fcmTokens && Array.isArray(data.fcmTokens)) {
-          // Find user in PostgreSQL and update fcmTokens
-          const user = await this.prisma.user.findFirst({
-            where: { firebaseUid: uid }
-          });
-          if (user) {
-            await this.prisma.user.update({
-              where: { id: user.id },
-              data: { fcmTokens: data.fcmTokens },
-            }).catch(err => this.logger.error(`Failed to sync fcmTokens for user ${uid}: ${err.message}`));
+        await this.prisma.runWithBypassSync(async () => {
+          const uid = change.doc.id;
+          const data = change.doc.data();
+          if (data.fcmTokens && Array.isArray(data.fcmTokens)) {
+            // Find user in PostgreSQL and update fcmTokens
+            const user = await this.prisma.user.findFirst({
+              where: { firebaseUid: uid }
+            });
+            if (user) {
+              await this.prisma.user.update({
+                where: { id: user.id },
+                data: { fcmTokens: data.fcmTokens },
+              }).catch(err => this.logger.error(`Failed to sync fcmTokens for user ${uid}: ${err.message}`));
+            }
           }
-        }
+        });
       }
     }, (error) => {
       this.logger.error('Error listening to Firebase users:', error);

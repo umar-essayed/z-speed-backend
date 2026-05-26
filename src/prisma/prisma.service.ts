@@ -5,6 +5,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
+import { AsyncLocalStorage } from 'async_hooks';
 
 @Injectable()
 export class PrismaService
@@ -13,6 +14,11 @@ export class PrismaService
 {
   private readonly logger = new Logger(PrismaService.name);
   public readonly raw: PrismaClient;
+  public readonly syncBypassStorage = new AsyncLocalStorage<boolean>();
+
+  async runWithBypassSync<T>(fn: () => Promise<T>): Promise<T> {
+    return this.syncBypassStorage.run(true, fn);
+  }
 
   constructor() {
     super({
@@ -29,6 +35,8 @@ export class PrismaService
       query: {
         $allModels: {
           async $allOperations({ model, operation, args, query }) {
+            const bypass = self.syncBypassStorage.getStore();
+
             // Only intercept write operations for Firestore sync
             const WRITE_OPERATIONS = new Set([
               'create', 'createMany', 'createManyAndReturn',
@@ -37,8 +45,8 @@ export class PrismaService
               'delete', 'deleteMany',
             ]);
 
-            // For read operations, just execute and return immediately — no sync needed
-            if (!WRITE_OPERATIONS.has(operation)) {
+            // For read operations or if bypass is enabled, just execute and return immediately — no sync needed
+            if (bypass || !WRITE_OPERATIONS.has(operation)) {
               return query(args);
             }
 

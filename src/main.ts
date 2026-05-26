@@ -35,9 +35,16 @@ async function bootstrap() {
       const isLocal = origin.startsWith('http://localhost') || 
                       origin.startsWith('http://127.0.0.1') || 
                       origin.startsWith('http://192.168.');
-      if (isLocal || origins.includes(origin.replace(/\/$/, ''))) {
+      
+      const originHost = origin.replace(/^https?:\/\//, '').replace(/\/$/, '').split(':')[0];
+      const isZspeedDomain = originHost === 'zspeedapp.com' || originHost.endsWith('.zspeedapp.com') ||
+                             originHost === 'zspeed.com' || originHost.endsWith('.zspeed.com') ||
+                             originHost === 'nexus-os.site' || originHost.endsWith('.nexus-os.site');
+
+      if (isLocal || isZspeedDomain || origins.includes(origin.replace(/\/$/, ''))) {
         callback(null, true);
       } else {
+        Logger.warn(`CORS blocked for origin: ${origin}`, 'Bootstrap');
         callback(null, false);
       }
     },

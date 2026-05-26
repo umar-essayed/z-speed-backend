@@ -37,7 +37,7 @@ export class PublicFoodController {
   }
 
   @Get(':id')
-  async getOne(@Param('id', ParseUUIDPipe) id: string) {
+  async getOne(@Param('id') id: string) {
     // Basic implementation
     return this.foodService.getFoodItems({ limit: 1 }).then(items => items[0]);
   }
@@ -64,7 +64,7 @@ export class FoodController {
   @Patch('menu-sections/:id')
   async updateSection(
     @CurrentUser('userId') userId: string,
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id') id: string,
     @Body() body: Partial<CreateMenuSectionDto>,
   ) {
     return this.foodService.updateSection(id, userId, body);
@@ -73,7 +73,7 @@ export class FoodController {
   @Delete('menu-sections/:id')
   async deleteSection(
     @CurrentUser('userId') userId: string,
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id') id: string,
   ) {
     return this.foodService.deleteSection(id, userId);
   }
@@ -93,7 +93,7 @@ export class FoodController {
   @Patch('food-items/:id')
   async updateFoodItem(
     @CurrentUser('userId') userId: string,
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id') id: string,
     @Body() body: Partial<CreateFoodItemDto>,
   ) {
     return this.foodService.updateFoodItem(id, userId, body);
@@ -102,7 +102,7 @@ export class FoodController {
   @Delete('food-items/:id')
   async deleteFoodItem(
     @CurrentUser('userId') userId: string,
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id') id: string,
   ) {
     return this.foodService.deleteFoodItem(id, userId);
   }
@@ -110,7 +110,7 @@ export class FoodController {
   @Patch('food-items/:id/availability')
   async toggleAvailability(
     @CurrentUser('userId') userId: string,
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id') id: string,
     @Body('isAvailable') isAvailable: boolean,
   ) {
     return this.foodService.toggleAvailability(id, userId, isAvailable);

@@ -100,7 +100,7 @@ class InMemoryRedis {
       provide: 'REDIS_CLIENT',
       useFactory: async (config: ConfigService) => {
         const logger = new Logger('RedisInitializer');
-        const url = config.get<string>('REDIS_URL');
+        const url = config.get<string>('REDIS_URL') || config.get<string>('REDISURL');
         
         const tryConnect = (redisUrlOrOpts: any, label: string): Promise<Redis | null> => {
           return new Promise((resolve) => {
@@ -208,20 +208,20 @@ class InMemoryRedis {
           });
         };
 
-        // 1. Try REDIS_URL first
+        // 1. Try REDIS_URL / REDISURL first
         if (url) {
-          const client = await tryConnect(url, 'REDIS_URL');
+          const client = await tryConnect(url, 'REDISURL');
           if (client) return createResilientClientProxy(client);
         }
 
-        // 2. Try REDIS_HOST next
-        const host = config.get<string>('REDIS_HOST');
+        // 2. Try REDIS_HOST / REDISHOST next
+        const host = config.get<string>('REDIS_HOST') || config.get<string>('REDISHOST');
         if (host && host !== 'localhost') {
           const client = await tryConnect({
             host,
-            port: config.get<number>('REDIS_PORT', 6379),
-            password: config.get<string>('REDIS_PASSWORD'),
-          }, 'REDIS_HOST');
+            port: config.get<number>('REDIS_PORT') || config.get<number>('REDISPORT') || 6379,
+            password: config.get<string>('REDIS_PASSWORD') || config.get<string>('REDISPASSWORD'),
+          }, 'REDISHOST');
           if (client) return createResilientClientProxy(client);
         }
 

@@ -14,7 +14,7 @@ import { MailerModule } from '../mailer/mailer.module';
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => {
-        const url = configService.get<string>('REDIS_URL');
+        const url = configService.get<string>('REDIS_URL') || configService.get<string>('REDISURL');
         if (url) {
           return {
             url: url,
@@ -26,9 +26,9 @@ import { MailerModule } from '../mailer/mailer.module';
         }
         return {
           redis: {
-            host: configService.get<string>('REDIS_HOST', 'localhost'),
-            port: configService.get<number>('REDIS_PORT', 6379),
-            password: configService.get<string>('REDIS_PASSWORD'),
+            host: configService.get<string>('REDIS_HOST') || configService.get<string>('REDISHOST') || 'localhost',
+            port: configService.get<number>('REDIS_PORT') || configService.get<number>('REDISPORT') || 6379,
+            password: configService.get<string>('REDIS_PASSWORD') || configService.get<string>('REDISPASSWORD'),
             maxRetriesPerRequest: null,
           },
         };

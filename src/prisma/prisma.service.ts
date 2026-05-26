@@ -12,6 +12,7 @@ export class PrismaService
   implements OnModuleInit, OnModuleDestroy
 {
   private readonly logger = new Logger(PrismaService.name);
+  public readonly raw: PrismaClient;
 
   constructor() {
     super({
@@ -114,6 +115,9 @@ export class PrismaService
 
     return new Proxy(this, {
       get(target, prop, receiver) {
+        if (prop === 'raw') {
+          return target;
+        }
         if (prop in extendedClient) {
           return Reflect.get(extendedClient, prop, receiver);
         }

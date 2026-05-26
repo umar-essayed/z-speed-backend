@@ -168,7 +168,7 @@ export class FoodService {
     const sectionIds = Array.from(new Set(dtos.map(d => d.sectionId)));
     
     for (const sectionId of sectionIds) {
-      const section = await this.prisma.menuSection.findUnique({
+      const section = await this.prisma.raw.menuSection.findUnique({
         where: { id: sectionId },
         include: { restaurant: true },
       });
@@ -180,8 +180,8 @@ export class FoodService {
 
     const results: any[] = [];
     
-    // 2. Insert items and their variants in a transaction
-    await this.prisma.$transaction(async (tx) => {
+    // 2. Insert items and their variants in a transaction using the raw client
+    await this.prisma.raw.$transaction(async (tx) => {
       for (const dto of dtos) {
         const { variants, ...itemData } = dto;
         const createdItem = await tx.foodItem.create({
@@ -257,97 +257,103 @@ export class FoodService {
       }
     });
 
-    // 3. Sync all items to Firestore in bulk
-    const admin = require('firebase-admin');
-    if (admin.apps.length) {
-      const db = admin.firestore();
-      if (db) {
-        // Group menuSection queries to avoid redundant DB reads
-        const sectionMap = new Map();
-        for (const sectionId of sectionIds) {
-          const section = await this.prisma.menuSection.findUnique({
-            where: { id: sectionId },
-            select: { 
-              restaurantId: true, 
-              firebaseId: true,
-              restaurant: { select: { firebaseId: true } }
+    // 3. Sync all items to Firestore in bulk (asynchronously in the background)
+    setImmediate(async () => {
+      try {
+        const admin = require('firebase-admin');
+        if (admin.apps.length) {
+          const db = admin.firestore();
+          if (db) {
+            // Group menuSection queries to avoid redundant DB reads
+            const sectionMap = new Map();
+            for (const sectionId of sectionIds) {
+              const section = await this.prisma.raw.menuSection.findUnique({
+                where: { id: sectionId },
+                select: { 
+                  restaurantId: true, 
+                  firebaseId: true,
+                  restaurant: { select: { firebaseId: true } }
+                }
+              }).catch(() => null);
+              if (section) {
+                sectionMap.set(sectionId, section);
+              }
             }
-          }).catch(() => null);
-          if (section) {
-            sectionMap.set(sectionId, section);
+
+            const batchSize = 500;
+            for (let i = 0; i < results.length; i += batchSize) {
+              const chunk = results.slice(i, i + batchSize);
+              const firestoreBatch = db.batch();
+              
+              for (const item of chunk) {
+                const section = sectionMap.get(item.sectionId);
+                const restaurantId = section?.restaurantId;
+                if (!restaurantId) continue;
+
+                const firestoreRestaurantId = section?.restaurant?.firebaseId || restaurantId;
+                const firestoreSectionId = section?.firebaseId || item.sectionId;
+
+                const variants = await this.prisma.raw.foodItemVariant.findMany({
+                  where: { foodItemId: item.id }
+                }).catch(() => []);
+
+                const syncData: any = {
+                  id: item.id,
+                  sectionId: firestoreSectionId,
+                  restaurantId: firestoreRestaurantId,
+                  name: item.name,
+                  nameAr: item.nameAr || null,
+                  description: item.description || null,
+                  descriptionAr: item.descriptionAr || null,
+                  imageUrl: item.imageUrl || null,
+                  price: item.price,
+                  originalPrice: item.originalPrice || null,
+                  isOnSale: item.isOnSale,
+                  isAvailable: item.isAvailable,
+                  stockQuantity: item.stockQuantity,
+                  hasFractions: item.hasFractions,
+                  fractionUnitName: item.fractionUnitName || null,
+                  fractionUnitNameAr: item.fractionUnitNameAr || null,
+                  unitsPerParent: item.unitsPerParent || null,
+                  fractionPrice: item.fractionPrice || null,
+                  addons: item.addons || null,
+                  allergens: item.allergens || [],
+                  prepTimeMin: item.prepTimeMin ?? 10,
+                  unit: item.unit || null,
+                  tags: item.tags || [],
+                  updatedAt: new Date(),
+                  variants: variants.map(v => ({
+                    id: v.firebaseId || v.id,
+                    foodItemId: v.foodItemId,
+                    name: v.name,
+                    nameAr: v.nameAr || null,
+                    price: v.price,
+                    originalPrice: v.originalPrice || null,
+                    stockQuantity: v.stockQuantity,
+                    isAvailable: v.isAvailable,
+                    isFraction: v.isFraction,
+                    fractionMultiplier: v.fractionMultiplier || null,
+                    updatedAt: v.updatedAt
+                  }))
+                };
+
+                const docRef = db.collection('restaurants').doc(firestoreRestaurantId)
+                  .collection('menuSections').doc(firestoreSectionId)
+                  .collection('items').doc(item.id);
+                
+                firestoreBatch.set(docRef, syncData, { merge: true });
+              }
+              
+              await firestoreBatch.commit().catch((err: any) => {
+                this.logger.error(`Failed to commit bulk firestore sync: ${err.message}`);
+              });
+            }
           }
         }
-
-        const batchSize = 500;
-        for (let i = 0; i < results.length; i += batchSize) {
-          const chunk = results.slice(i, i + batchSize);
-          const firestoreBatch = db.batch();
-          
-          for (const item of chunk) {
-            const section = sectionMap.get(item.sectionId);
-            const restaurantId = section?.restaurantId;
-            if (!restaurantId) continue;
-
-            const firestoreRestaurantId = section?.restaurant?.firebaseId || restaurantId;
-            const firestoreSectionId = section?.firebaseId || item.sectionId;
-
-            const variants = await this.prisma.foodItemVariant.findMany({
-              where: { foodItemId: item.id }
-            }).catch(() => []);
-
-            const syncData: any = {
-              id: item.id,
-              sectionId: firestoreSectionId,
-              restaurantId: firestoreRestaurantId,
-              name: item.name,
-              nameAr: item.nameAr || null,
-              description: item.description || null,
-              descriptionAr: item.descriptionAr || null,
-              imageUrl: item.imageUrl || null,
-              price: item.price,
-              originalPrice: item.originalPrice || null,
-              isOnSale: item.isOnSale,
-              isAvailable: item.isAvailable,
-              stockQuantity: item.stockQuantity,
-              hasFractions: item.hasFractions,
-              fractionUnitName: item.fractionUnitName || null,
-              fractionUnitNameAr: item.fractionUnitNameAr || null,
-              unitsPerParent: item.unitsPerParent || null,
-              fractionPrice: item.fractionPrice || null,
-              addons: item.addons || null,
-              allergens: item.allergens || [],
-              prepTimeMin: item.prepTimeMin ?? 10,
-              unit: item.unit || null,
-              tags: item.tags || [],
-              updatedAt: new Date(),
-              variants: variants.map(v => ({
-                id: v.firebaseId || v.id,
-                foodItemId: v.foodItemId,
-                name: v.name,
-                nameAr: v.nameAr || null,
-                price: v.price,
-                originalPrice: v.originalPrice || null,
-                stockQuantity: v.stockQuantity,
-                isAvailable: v.isAvailable,
-                isFraction: v.isFraction,
-                fractionMultiplier: v.fractionMultiplier || null,
-                updatedAt: v.updatedAt
-              }))
-            };
-
-            const docRef = db.collection('restaurants').doc(firestoreRestaurantId)
-              .collection('menuSections').doc(firestoreSectionId)
-              .collection('items').doc(item.id);
-            
-            firestoreBatch.set(docRef, syncData, { merge: true });
-          }
-          
-          await firestoreBatch.commit().catch((err: any) => {
-            this.logger.error(`Failed to commit bulk firestore sync: ${err.message}`);
-          });
-        }
+      } catch (err: any) {
+        this.logger.error(`Background bulk Firestore sync failed: ${err.message}`);
       }
-    }
+    });
 
     return { count: results.length };
   }

@@ -75,6 +75,8 @@ export class PrismaService
                     await self.syncFoodItemToFirestore(db, action, params, result, preDeleteData);
                   } else if (model === 'FoodItemVariant') {
                     await self.syncFoodItemVariantToFirestore(db, action, params, result, preDeleteData);
+                  } else if (model === 'SystemConfig') {
+                    await self.syncSystemConfigToFirestore(db, action, params, result);
                   }
                 }
               }
@@ -409,5 +411,19 @@ export class PrismaService
         deletedAt: { not: null, lt: cutoff },
       },
     });
+  }
+
+  private async syncSystemConfigToFirestore(db: any, action: string, params: any, result: any) {
+    if (action === 'delete' || action === 'deleteMany') {
+      return;
+    }
+    if (result && result.defaultAppCommissionRate !== undefined) {
+      await db.collection('sys_settings').doc('app_settings').set({
+        platformCommission: parseFloat(result.defaultAppCommissionRate.toString()),
+      }, { merge: true }).catch((err: any) => {
+        this.logger.warn(`Failed to sync SystemConfig to Firestore: ${err.message}`);
+      });
+      this.logger.log(`Synced SystemConfig to Firestore platformCommission: ${result.defaultAppCommissionRate}`);
+    }
   }
 }

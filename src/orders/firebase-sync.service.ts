@@ -443,8 +443,8 @@ export class FirebaseSyncService implements OnModuleInit {
       // ── Financial Calculation (uses Admin Settings) ─────────────────────────
       // Load system config so Firebase orders obey the same fee rules as web orders
       const sysConfig = await this.prisma.systemConfig.findFirst();
-      const platformFeePercent = sysConfig?.platformFeePercent ?? 2.0;
       const commissionRate     = sysConfig?.defaultAppCommissionRate ?? 0.20;
+      const platformFeePercent = commissionRate * 100;
 
       const rawDeliveryFee = Number(data.deliveryFee || data.delivery_fee || 0);
       const rawTax         = Number(data.tax || data.tax_amount || 0);
@@ -1251,18 +1251,26 @@ export class FirebaseSyncService implements OnModuleInit {
         await this.prisma.restaurant.update({
           where: { id: order.restaurantId },
           data: {
+            walletBalance:  { increment: restaurantShare },
             pendingBalance: { increment: restaurantShare },
             totalEarnings:  { increment: restaurantShare },
           },
         });
         if (order.restaurant?.ownerId) {
+          await this.prisma.user.update({
+            where: { id: order.restaurant.ownerId },
+            data: {
+              walletBalance: { increment: restaurantShare },
+            },
+          });
+
           await this.prisma.ledger.create({
             data: {
               userId:    order.restaurant.ownerId,
               orderId:   order.id,
               type:      'EARNING',
               amount:    restaurantShare,
-              status:    'pending',
+              status:    'completed',
               signature: SignatureUtil.signLedgerEntry({ userId: order.restaurant.ownerId, orderId: order.id, type: 'EARNING', amount: restaurantShare }),
             },
           });

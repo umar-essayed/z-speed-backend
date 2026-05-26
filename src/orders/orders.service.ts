@@ -133,7 +133,7 @@ export class OrdersService {
 
     // 4.5 Calculate Service Fee (Commission)
     const sysConfig = await this.prisma.systemConfig.findUnique({ where: { id: 'default' } });
-    const fallbackFeePercent = sysConfig?.platformFeePercent ?? 2.0;
+    const fallbackFeePercent = (sysConfig?.defaultAppCommissionRate ?? 0.20) * 100;
     let serviceFee = 0;
     const r = restaurant as any;
 
@@ -881,24 +881,32 @@ export class OrdersService {
       }
     });
 
-    // 3. Restaurant Settlement (Pending Balance)
+    // 3. Restaurant Settlement (Instant Wallet Settlement)
     if (restaurant) {
       await this.prisma.restaurant.update({
         where: { id: order.restaurantId },
         data: {
+          walletBalance: { increment: restaurantShare },
           pendingBalance: { increment: restaurantShare },
           totalEarnings: { increment: restaurantShare },
         },
       });
 
-      // Log earning as pending for the restaurant owner
+      await this.prisma.user.update({
+        where: { id: restaurant.ownerId },
+        data: {
+          walletBalance: { increment: restaurantShare },
+        },
+      });
+
+      // Log earning as completed for the restaurant owner
       await this.prisma.ledger.create({
         data: {
           userId: restaurant.ownerId,
           orderId: order.id,
           type: 'EARNING',
           amount: restaurantShare,
-          status: 'pending', // Marks that it's waiting for Payout Cycle
+          status: 'completed',
           signature: SignatureUtil.signLedgerEntry({
             userId: restaurant.ownerId,
             orderId: order.id,

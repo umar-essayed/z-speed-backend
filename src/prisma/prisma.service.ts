@@ -20,15 +20,88 @@ export class PrismaService
         { level: 'warn', emit: 'stdout' },
       ],
     });
+
+    const admin = require('firebase-admin');
+    const self = this;
+
+    const extendedClient = this.$extends({
+      query: {
+        $allModels: {
+          async $allOperations({ model, operation, args, query }) {
+            let preDeleteData: any = null;
+
+            if (operation === 'delete' || operation === 'deleteMany') {
+              try {
+                if (model === 'MenuSection') {
+                  preDeleteData = await self.menuSection.findFirst({
+                    where: args.where,
+                    select: { id: true, restaurantId: true }
+                  });
+                } else if (model === 'FoodItem') {
+                  preDeleteData = await self.foodItem.findFirst({
+                    where: args.where,
+                    select: { id: true, sectionId: true }
+                  });
+                } else if (model === 'FoodItemVariant') {
+                  preDeleteData = await self.foodItemVariant.findFirst({
+                    where: args.where,
+                    select: { id: true, foodItemId: true }
+                  });
+                }
+              } catch (e) {
+                self.logger.warn(`Failed to retrieve pre-delete data for model ${model}: ${e.message}`);
+              }
+            }
+
+            const result = await query(args);
+
+            // Perform Firestore synchronization post-commit
+            try {
+              if (admin.apps.length) {
+                const db = admin.firestore();
+                if (db) {
+                  const action = operation;
+                  const params = { model, action, args };
+
+                  if (model === 'Restaurant') {
+                    await self.syncRestaurantToFirestore(db, action, params, result);
+                  } else if (model === 'User') {
+                    await self.syncUserToFirestore(db, action, params, result);
+                  } else if (model === 'DriverProfile') {
+                    await self.syncDriverProfileToFirestore(db, action, params, result);
+                  } else if (model === 'MenuSection') {
+                    await self.syncMenuSectionToFirestore(db, action, params, result, preDeleteData);
+                  } else if (model === 'FoodItem') {
+                    await self.syncFoodItemToFirestore(db, action, params, result, preDeleteData);
+                  } else if (model === 'FoodItemVariant') {
+                    await self.syncFoodItemVariantToFirestore(db, action, params, result, preDeleteData);
+                  }
+                }
+              }
+            } catch (err) {
+              self.logger.warn(`Prisma global Firestore sync failed for model ${model}: ${err.message}`);
+            }
+
+            return result;
+          }
+        }
+      }
+    });
+
+    return new Proxy(this, {
+      get(target, prop, receiver) {
+        if (prop in extendedClient) {
+          return Reflect.get(extendedClient, prop, receiver);
+        }
+        return Reflect.get(target, prop, receiver);
+      }
+    });
   }
 
   async onModuleInit() {
     try {
       await this.$connect();
       this.logger.log('✅ Prisma connected to database');
-      
-      // Register global bidirectional sync middleware
-      this.registerFirestoreSyncMiddleware();
     } catch (error) {
       this.logger.error('❌ Prisma connection failed:', error);
     }
@@ -37,69 +110,6 @@ export class PrismaService
   async onModuleDestroy() {
     await this.$disconnect();
     this.logger.log('🔌 Prisma disconnected from database');
-  }
-
-  /**
-   * Register global Prisma middleware to auto-sync modifications back to Firestore
-   */
-  private registerFirestoreSyncMiddleware() {
-    const admin = require('firebase-admin');
-
-    (this as any).$use(async (params: any, next: any) => {
-      const model = params.model;
-      const action = params.action;
-
-      let preDeleteData: any = null;
-      if (action === 'delete' || action === 'deleteMany') {
-        try {
-          if (model === 'MenuSection') {
-            preDeleteData = await (this as any).menuSection.findFirst({
-              where: params.args.where,
-              select: { id: true, restaurantId: true }
-            });
-          } else if (model === 'FoodItem') {
-            preDeleteData = await (this as any).foodItem.findFirst({
-              where: params.args.where,
-              select: { id: true, sectionId: true }
-            });
-          } else if (model === 'FoodItemVariant') {
-            preDeleteData = await (this as any).foodItemVariant.findFirst({
-              where: params.args.where,
-              select: { id: true, foodItemId: true }
-            });
-          }
-        } catch (e) {
-          this.logger.warn(`Failed to retrieve pre-delete data for model ${model}: ${e.message}`);
-        }
-      }
-
-      const result = await next(params);
-
-      // Perform Firestore synchronization in background post-commit
-      try {
-        if (!admin.apps.length) return result;
-        const db = admin.firestore();
-        if (!db) return result;
-
-        if (model === 'Restaurant') {
-          await this.syncRestaurantToFirestore(db, action, params, result);
-        } else if (model === 'User') {
-          await this.syncUserToFirestore(db, action, params, result);
-        } else if (model === 'DriverProfile') {
-          await this.syncDriverProfileToFirestore(db, action, params, result);
-        } else if (model === 'MenuSection') {
-          await this.syncMenuSectionToFirestore(db, action, params, result, preDeleteData);
-        } else if (model === 'FoodItem') {
-          await this.syncFoodItemToFirestore(db, action, params, result, preDeleteData);
-        } else if (model === 'FoodItemVariant') {
-          await this.syncFoodItemVariantToFirestore(db, action, params, result, preDeleteData);
-        }
-      } catch (err) {
-        this.logger.warn(`Prisma global Firestore sync failed for model ${model}: ${err.message}`);
-      }
-
-      return result;
-    });
   }
 
   private async syncRestaurantToFirestore(db: any, action: string, params: any, result: any) {
@@ -343,6 +353,15 @@ export class PrismaService
     let foodItemId = result?.foodItemId;
     if (action === 'delete' || action === 'deleteMany') {
       foodItemId = preDeleteData?.foodItemId;
+    }
+    
+    // Support createMany / updateMany operations where foodItemId is inside the array/object of args.data
+    if (!foodItemId && params?.args?.data) {
+      if (Array.isArray(params.args.data)) {
+        foodItemId = params.args.data[0]?.foodItemId;
+      } else {
+        foodItemId = params.args.data?.foodItemId;
+      }
     }
     
     if (foodItemId) {

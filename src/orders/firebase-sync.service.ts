@@ -1131,30 +1131,30 @@ export class FirebaseSyncService implements OnModuleInit {
       
       // 1. Sync Status if changed in Firebase
       if (targetStatus && order.status !== targetStatus) {
-        // Validate transition via state machine before applying
+        // Validate transition via state machine for logging/warning purposes
         if (!this.stateMachine.canTransition(order.status, targetStatus, 'DRIVER' as any)) {
-          this.logger.warn(`Firebase status sync blocked: invalid transition ${order.status} → ${targetStatus} for order ${postgresOrderId}`);
-        } else {
-          this.logger.log(`🔄 Syncing status change FROM Firebase: ${firebaseStatus} -> ${targetStatus} for Order ${postgresOrderId}`);
+          this.logger.warn(`Firebase status sync warning: transition ${order.status} → ${targetStatus} for order ${postgresOrderId} is technically invalid but forcing sync to ensure consistency.`);
+        }
+        
+        this.logger.log(`🔄 Syncing status change FROM Firebase: ${firebaseStatus} -> ${targetStatus} for Order ${postgresOrderId}`);
 
-          const updatedOrder = await this.prisma.order.update({
-            where: { id: postgresOrderId },
-            data: {
-              status: targetStatus,
-              ...(targetStatus === OrderStatus.PICKED_UP ? { pickedUpAt: new Date() } : {}),
-              ...(targetStatus === OrderStatus.OUT_FOR_DELIVERY ? { outForDeliveryAt: new Date() } : {}),
-              ...(targetStatus === OrderStatus.DELIVERED ? { deliveredAt: new Date() } : {}),
-            },
-            include: { restaurant: true, items: true }
-          });
+        const updatedOrder = await this.prisma.order.update({
+          where: { id: postgresOrderId },
+          data: {
+            status: targetStatus,
+            ...(targetStatus === OrderStatus.PICKED_UP ? { pickedUpAt: new Date() } : {}),
+            ...(targetStatus === OrderStatus.OUT_FOR_DELIVERY ? { outForDeliveryAt: new Date() } : {}),
+            ...(targetStatus === OrderStatus.DELIVERED ? { deliveredAt: new Date() } : {}),
+          },
+          include: { restaurant: true, items: true }
+        });
 
-          // Broadcast to Vendor dashboard
-          this.gateway.emitToVendor(order.restaurantId, 'order:status_changed', updatedOrder);
+        // Broadcast to Vendor dashboard
+        this.gateway.emitToVendor(order.restaurantId, 'order:status_changed', updatedOrder);
 
-          // If delivered, handle earnings
-          if (targetStatus === OrderStatus.DELIVERED && order.status !== OrderStatus.DELIVERED) {
-            await this.handleOrderDeliveredInternal(updatedOrder);
-          }
+        // If delivered, handle earnings
+        if (targetStatus === OrderStatus.DELIVERED && order.status !== OrderStatus.DELIVERED) {
+          await this.handleOrderDeliveredInternal(updatedOrder);
         }
       }
 

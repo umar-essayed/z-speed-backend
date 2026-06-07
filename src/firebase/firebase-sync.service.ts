@@ -17,50 +17,98 @@ export class FirebaseSyncService implements OnModuleInit {
     this.logger.log('Initializing Firebase real-time listeners...');
     try {
       this.setupRealtimeListeners();
+      // Run historical sync/reconciliation once asynchronously on startup
+      setImmediate(async () => {
+        try {
+          this.logger.log('Running startup sync/reconciliation...');
+          await this.syncAllData();
+          this.logger.log('Startup sync/reconciliation completed.');
+        } catch (err) {
+          this.logger.error('Startup sync/reconciliation failed:', err);
+        }
+      });
     } catch (error) {
       this.logger.error('Failed to initialize Firebase real-time listeners:', error);
     }
   }
 
   /**
-   * One-time sync of all existing data from Firebase to PostgreSQL (scheduled every 12 hours at 3:00 AM and 3:00 PM)
+   * Sync all existing data and reconcile deletions from Firebase to PostgreSQL (scheduled every 12 hours at 3:00 AM and 3:00 PM)
    */
   @Cron('0 3,15 * * *')
   async syncAllData() {
     const firestore = this.firebaseAdmin.getFirestore();
-    if (!firestore) {
-      this.logger.warn('Firestore not initialized, skipping sync.');
+    const auth = this.firebaseAdmin.getAuth();
+    if (!firestore || !auth) {
+      this.logger.warn('Firestore or Auth not initialized, skipping sync.');
       return;
     }
 
-    // 1. Sync Users / Admins
+    const activeFirebaseUids = new Set<string>();
+
+    // 1. Sync Users / Admins from Firestore
     try {
       const usersSnapshot = await firestore.collection('users').get();
       let syncedUsers = 0;
       for (const doc of usersSnapshot.docs) {
         await this.syncUserToPostgres(doc.id, doc.data());
+        activeFirebaseUids.add(doc.id);
         syncedUsers++;
       }
-      this.logger.log(`Successfully verified and synced ${syncedUsers} users/admins from Firebase.`);
+      this.logger.log(`Successfully verified and synced ${syncedUsers} users/admins from Firebase Firestore.`);
     } catch (err) {
       this.logger.error('Error syncing old users data:', err);
     }
 
-    // 2. Sync Vendor Applications (Optional - but ensures consistency)
+    // 2. Fetch all Firebase Auth Users to ensure we catch UIDs from Auth
     try {
-      const vendorsSnapshot = await firestore.collection('vendor_applications').get();
-      let syncedVendors = 0;
-      for (const doc of vendorsSnapshot.docs) {
-        // You can add logic to ensure approved vendors exist as Restaurants
-        // But mainly we rely on the Admin Panel Approve endpoint to do this.
-        syncedVendors++;
-      }
-      this.logger.log(`Verified ${syncedVendors} vendor applications in Firebase.`);
+      let pageToken: string | undefined = undefined;
+      do {
+        const listUsersResult: any = await auth.listUsers(1000, pageToken);
+        for (const userRecord of listUsersResult.users) {
+          activeFirebaseUids.add(userRecord.uid);
+        }
+        pageToken = listUsersResult.pageToken;
+      } while (pageToken);
+      this.logger.log(`Collected active Firebase Auth users. Total unique Firebase UIDs: ${activeFirebaseUids.size}`);
     } catch (err) {
-      this.logger.error('Error verifying vendor applications:', err);
+      this.logger.error('Error fetching Firebase Auth users list:', err);
     }
 
-    // 3. Sync Restaurants
+    // 3. Reconcile Deletions (Postgres -> Firebase check)
+    try {
+      const pgActiveUsers = await this.prisma.user.findMany({
+        where: {
+          firebaseUid: { not: null },
+          deletedAt: null,
+        },
+      });
+
+      let softDeletedCount = 0;
+      for (const user of pgActiveUsers) {
+        if (user.firebaseUid && !activeFirebaseUids.has(user.firebaseUid)) {
+          this.logger.log(`Reconciliation Sync: User ${user.name} (${user.email}) with firebaseUid ${user.firebaseUid} is no longer in Firebase. Soft-deleting/banning in Postgres.`);
+          
+          await this.prisma.runWithBypassSync(async () => {
+            await this.prisma.user.update({
+              where: { id: user.id },
+              data: {
+                status: AccountStatus.BANNED,
+                deletedAt: new Date(),
+              },
+            });
+          });
+          softDeletedCount++;
+        }
+      }
+      if (softDeletedCount > 0) {
+        this.logger.log(`Reconciliation Sync: Soft-deleted/banned ${softDeletedCount} users who were deleted from Firebase.`);
+      }
+    } catch (err) {
+      this.logger.error('Error during deletion reconciliation:', err);
+    }
+
+    // 4. Sync Restaurants
     try {
       const restaurantsSnapshot = await firestore.collection('restaurants').get();
       let syncedRestaurants = 0;
@@ -159,12 +207,16 @@ export class FirebaseSyncService implements OnModuleInit {
   private async syncUserToPostgres(uid: string, data: any) {
     if (!data.email) return;
 
-    // Map Firebase roles to PostgreSQL roles
-    let role: Role = Role.CUSTOMER;
-    if (data.role === 'admin' || data.role === 'ADMIN') role = Role.ADMIN;
-    else if (data.role === 'superadmin' || data.role === 'SUPERADMIN') role = Role.SUPERADMIN as Role;
-    else if (data.role === 'vendor' || data.role === 'VENDOR') role = Role.VENDOR;
-    else if (data.role === 'driver' || data.role === 'DRIVER') role = Role.DRIVER;
+    // Map Firebase roles to PostgreSQL roles (if role is explicitly specified in Firebase doc)
+    let role: Role | undefined = undefined;
+    if (data.role) {
+      const r = data.role.toString().toLowerCase();
+      if (r === 'admin') role = Role.ADMIN;
+      else if (r === 'superadmin') role = Role.SUPERADMIN;
+      else if (r === 'vendor') role = Role.VENDOR;
+      else if (r === 'driver') role = Role.DRIVER;
+      else if (r === 'customer') role = Role.CUSTOMER;
+    }
 
     let fcmTokens: string[] = [];
     if (data.fcmTokens) {
@@ -201,7 +253,7 @@ export class FirebaseSyncService implements OnModuleInit {
             firebaseUid: uid,
             email: data.email,
             name: data.displayName || data.name || data.email.split('@')[0],
-            role: role,
+            role: role || Role.CUSTOMER,
             status: status || AccountStatus.ACTIVE,
             emailVerified: true,
             authProvider: 'firebase',
@@ -221,17 +273,18 @@ export class FirebaseSyncService implements OnModuleInit {
           }
         }
 
-        // Update existing user with Firebase UID and Role (if Firebase has a higher privilege)
+        // Update existing user with Firebase UID and Role (restores/aligns role properly, like DRIVER/VENDOR)
         await this.prisma.user.update({
           where: { id: existingUser.id },
           data: {
             firebaseUid: uid,
-            // Only update role if it's admin/superadmin to avoid demoting someone accidentally
-            role: (role === Role.ADMIN || (role as any) === 'SUPERADMIN') ? role : existingUser.role,
+            role: role !== undefined ? role : undefined,
             status: status,
             name: existingUser.name || data.displayName || data.name,
             phone: existingUser.phone || data.phone || data.phoneNumber,
             fcmTokens: fcmTokens.length > 0 ? fcmTokens : undefined,
+            // If the user was soft-deleted but is still active in Firebase, restore them on login/update
+            deletedAt: null,
           }
         });
       }

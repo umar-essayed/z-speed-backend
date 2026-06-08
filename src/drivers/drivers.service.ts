@@ -507,6 +507,7 @@ export class DriversService {
         applicationStatus: ApplicationStatus.APPROVED,
         isAvailable: true,
         lastPingAt: { gte: new Date(Date.now() - 10 * 60 * 1000) }, // Active in last 10 min
+        user: { deletedAt: null },
       },
       include: { vehicle: true },
     });
@@ -558,6 +559,7 @@ export class DriversService {
         applicationStatus: ApplicationStatus.APPROVED,
         currentLat: { not: null },
         currentLng: { not: null },
+        user: { deletedAt: null },
       },
       include: {
         user: {

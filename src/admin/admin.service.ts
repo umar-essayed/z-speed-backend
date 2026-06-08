@@ -88,14 +88,14 @@ export class AdminService {
       this.prisma.order.aggregate({ _sum: { total: true }, where: { status: OrderStatus.DELIVERED } }),
       this.prisma.order.count({ where: { status: OrderStatus.PENDING } }),
       this.prisma.restaurant.count({ where: { status: AccountStatus.ACTIVE } }),
-      this.prisma.driverProfile.count({ where: { applicationStatus: { in: ['PENDING', 'UNDER_REVIEW'] } as any } }),
+      this.prisma.driverProfile.count({ where: { applicationStatus: { in: ['PENDING', 'UNDER_REVIEW'] } as any, user: { deletedAt: null } } }),
       
       // REAL-TIME STATS
       this.prisma.order.count({
         where: { status: { notIn: [OrderStatus.DELIVERED, OrderStatus.CANCELLED, OrderStatus.RETURNED] } },
       }),
       this.prisma.driverProfile.count({
-        where: { isAvailable: true }, 
+        where: { isAvailable: true, user: { deletedAt: null } }, 
       }),
       this.prisma.restaurant.count({
         where: { isOpen: true, status: AccountStatus.ACTIVE },
@@ -461,7 +461,11 @@ export class AdminService {
   // =============================================
 
   async getDriverApplications(status?: string) {
-    const where: any = {};
+    const where: any = {
+      user: {
+        deletedAt: null,
+      },
+    };
     if (status && status !== 'all') {
       const s = status.toUpperCase();
       if (s === 'PENDING') {
@@ -1535,7 +1539,10 @@ export class AdminService {
   async getPendingApplications() {
     const [drivers, restaurants] = await Promise.all([
       this.prisma.driverProfile.findMany({
-        where: { applicationStatus: { in: ['PENDING', 'UNDER_REVIEW'] } as any },
+        where: { 
+          applicationStatus: { in: ['PENDING', 'UNDER_REVIEW'] } as any,
+          user: { deletedAt: null }
+        },
         include: { user: true },
       }),
       this.prisma.restaurant.findMany({
@@ -1665,6 +1672,7 @@ export class AdminService {
       }),
       // Drivers (All, to show they exist)
       this.prisma.driverProfile.findMany({
+        where: { user: { deletedAt: null } },
         select: { id: true, totalEarnings: true, debtBalance: true, user: { select: { id: true, name: true, walletBalance: true } } },
         orderBy: { user: { name: 'asc' } },
       }),
@@ -1892,7 +1900,7 @@ export class AdminService {
   async getMapData() {
     const [drivers, restaurants, recentOrders] = await Promise.all([
       this.prisma.driverProfile.findMany({
-        where: { isAvailable: true, applicationStatus: 'APPROVED' },
+        where: { isAvailable: true, applicationStatus: 'APPROVED', user: { deletedAt: null } },
         include: {
           user: { select: { id: true, name: true, phone: true } },
           vehicle: true,
@@ -1931,7 +1939,10 @@ export class AdminService {
 
   async reconcileFinancials() {
     const [drivers, restaurants] = await Promise.all([
-      this.prisma.driverProfile.findMany({ include: { user: { select: { walletBalance: true } } } }),
+      this.prisma.driverProfile.findMany({ 
+        where: { user: { deletedAt: null } },
+        include: { user: { select: { walletBalance: true } } } 
+      }),
       this.prisma.restaurant.findMany({ select: { id: true, walletBalance: true, name: true, ownerId: true } }),
     ]);
 

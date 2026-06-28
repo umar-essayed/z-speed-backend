@@ -480,12 +480,22 @@ export class FirebaseSyncService implements OnModuleInit {
           try {
             const authUser = await this.firebaseAdmin.getAuth().getUser(data.customerId);
             if (authUser) {
+              let phoneToSet = authUser.phoneNumber || null;
+              if (phoneToSet) {
+                const phoneOwner = await this.prisma.user.findFirst({
+                  where: { phone: phoneToSet },
+                });
+                if (phoneOwner) {
+                  this.logger.warn(`Phone number ${phoneToSet} is already taken by user ${phoneOwner.email}. Skipping phone assignment for customer ${authUser.uid}.`);
+                  phoneToSet = null;
+                }
+              }
               user = await this.prisma.user.create({
                 data: {
                   firebaseUid: authUser.uid,
                   email: authUser.email || `${authUser.uid}@temp.zspeed.com`,
                   name: authUser.displayName || data.customerName || 'Z-SPEED App User',
-                  phone: authUser.phoneNumber || null,
+                  phone: phoneToSet,
                   role: 'CUSTOMER',
                 }
               });
@@ -1068,6 +1078,25 @@ export class FirebaseSyncService implements OnModuleInit {
           userData.name = authUser.displayName || userData.name;
           userData.phone = authUser.phoneNumber || userData.phone;
         } catch (e) {}
+      }
+
+      // Check if phone number is already taken
+      if (userData.phone) {
+        const phoneOwner = await this.prisma.user.findFirst({
+          where: {
+            phone: userData.phone,
+            id: user ? { not: user.id } : undefined,
+          },
+        });
+        if (phoneOwner) {
+          this.logger.warn(`Phone number ${userData.phone} is already taken by user ${phoneOwner.email}. Skipping phone assignment/update for driver ${uid}.`);
+          userData.phone = user ? user.phone : null;
+        }
+      } else if (user) {
+        userData.phone = user.phone;
+      }
+
+      if (!user) {
         user = await this.prisma.user.create({ data: userData });
       } else {
         // Update existing user to keep name/phone/wallet in sync

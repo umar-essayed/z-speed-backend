@@ -256,6 +256,23 @@ export class FirebaseSyncService implements OnModuleInit {
         }
       });
 
+      // Resolve and validate phone number to avoid unique constraint violations
+      let phoneToSet = data.phone || data.phoneNumber || null;
+      if (phoneToSet) {
+        const phoneOwner = await this.prisma.user.findFirst({
+          where: {
+            phone: phoneToSet,
+            id: existingUser ? { not: existingUser.id } : undefined,
+          },
+        });
+        if (phoneOwner) {
+          this.logger.warn(`Phone number ${phoneToSet} is already taken by user ${phoneOwner.email}. Skipping phone assignment for user ${data.email || uid}.`);
+          phoneToSet = existingUser ? existingUser.phone : null;
+        }
+      } else if (existingUser) {
+        phoneToSet = existingUser.phone;
+      }
+
       if (!existingUser) {
         // Create new user in Postgres
         await this.prisma.user.create({
@@ -267,7 +284,7 @@ export class FirebaseSyncService implements OnModuleInit {
             status: status || AccountStatus.ACTIVE,
             emailVerified: true,
             authProvider: 'firebase',
-            phone: data.phone || data.phoneNumber || null,
+            phone: phoneToSet,
             fcmTokens: fcmTokens.length > 0 ? fcmTokens : undefined,
           }
         });
@@ -291,7 +308,7 @@ export class FirebaseSyncService implements OnModuleInit {
             role: role !== undefined ? role : undefined,
             status: status,
             name: existingUser.name || data.displayName || data.name,
-            phone: existingUser.phone || data.phone || data.phoneNumber,
+            phone: phoneToSet,
             fcmTokens: fcmTokens.length > 0 ? fcmTokens : undefined,
             // If the user was soft-deleted but is still active in Firebase, restore them on login/update
             deletedAt: null,

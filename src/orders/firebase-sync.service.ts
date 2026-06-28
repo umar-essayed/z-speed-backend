@@ -128,7 +128,12 @@ export class FirebaseSyncService implements OnModuleInit {
             const fbSectionId = change.doc.id;
             this.logger.log(`[Realtime Sync] Menu section removed in Firestore: ${fbSectionId}. Deleting from Postgres.`);
             await this.prisma.menuSection.deleteMany({
-              where: { firebaseId: fbSectionId }
+              where: {
+                OR: [
+                  { firebaseId: fbSectionId },
+                  { id: fbSectionId }
+                ]
+              }
             }).catch(err => this.logger.error(`Error deleting menu section ${fbSectionId}: ${err.message}`));
           } else {
             await this.syncMenuSection(change.doc);
@@ -154,7 +159,12 @@ export class FirebaseSyncService implements OnModuleInit {
             const fbItemId = change.doc.id;
             this.logger.log(`[Realtime Sync] Food item removed in Firestore: ${fbItemId}. Deleting from Postgres.`);
             await this.prisma.foodItem.deleteMany({
-              where: { firebaseId: fbItemId }
+              where: {
+                OR: [
+                  { firebaseId: fbItemId },
+                  { id: fbItemId }
+                ]
+              }
             }).catch(err => this.logger.error(`Error deleting food item ${fbItemId}: ${err.message}`));
           } else {
             await this.syncFoodItem(change.doc);
@@ -716,56 +726,57 @@ export class FirebaseSyncService implements OnModuleInit {
       ownerId = user.id;
 
       // 2. Create or Update Restaurant
-      await this.prisma.restaurant.upsert({
-        where: { firebaseId: doc.id },
-        update: {
-          name: data.name || 'Synced Restaurant',
-          nameAr: data.nameAr || null,
-          description: data.description || null,
-          logoUrl: data.logoUrl || data.image || data.imageUrl || data.logo || null,
-          coverImageUrl: data.coverImageUrl || data.coverImage || data.image || data.imageUrl || null,
-          isActive: data.isActive !== undefined ? data.isActive : true,
-          isOpen: data.isOpen !== undefined ? data.isOpen : true,
-          vendorType: data.vendorType || 'restaurant',
-          address: data.address || null,
-          city: data.city || null,
-          latitude: safeParseFloat(data.latitude),
-          longitude: safeParseFloat(data.longitude),
-          deliveryRadiusKm: safeParseFloat(data.deliveryRadiusKm),
-          deliveryTimeMin: safeParseInt(data.deliveryTimeMin),
-          deliveryTimeMax: safeParseInt(data.deliveryTimeMax),
-          deliveryFeeMode: data.deliveryFeeMode || null,
-          deliveryFee: safeParseFloat(data.deliveryFee, 0.0)!,
-          minimumOrder: safeParseFloat(data.minimumOrder, 0.0)!,
-          deliveryFeeFormula: data.deliveryFeeFormula || null,
-          deliveryFeeTiers: data.deliveryFeeTiers || null,
-        },
-        create: {
-          firebaseId: doc.id,
-          ownerId: ownerId,
-          name: data.name || 'Synced Restaurant',
-          nameAr: data.nameAr || null,
-          description: data.description || null,
-          logoUrl: data.logoUrl || data.image || data.imageUrl || data.logo || null,
-          coverImageUrl: data.coverImageUrl || data.coverImage || data.image || data.imageUrl || null,
-          isActive: data.isActive !== undefined ? data.isActive : true,
-          isOpen: data.isOpen !== undefined ? data.isOpen : true,
-          vendorType: data.vendorType || 'restaurant',
-          address: data.address || null,
-          city: data.city || null,
-          latitude: safeParseFloat(data.latitude),
-          longitude: safeParseFloat(data.longitude),
-          deliveryRadiusKm: safeParseFloat(data.deliveryRadiusKm),
-          deliveryTimeMin: safeParseInt(data.deliveryTimeMin),
-          deliveryTimeMax: safeParseInt(data.deliveryTimeMax),
-          deliveryFeeMode: data.deliveryFeeMode || null,
-          deliveryFee: safeParseFloat(data.deliveryFee, 0.0)!,
-          minimumOrder: safeParseFloat(data.minimumOrder, 0.0)!,
-          deliveryFeeFormula: data.deliveryFeeFormula || null,
-          deliveryFeeTiers: data.deliveryFeeTiers || null,
-          status: 'ACTIVE',
+      const existing = await this.prisma.restaurant.findFirst({
+        where: {
+          OR: [
+            { firebaseId: doc.id },
+            { id: doc.id }
+          ]
         }
       });
+
+      const restaurantData = {
+        name: data.name || 'Synced Restaurant',
+        nameAr: data.nameAr || null,
+        description: data.description || null,
+        logoUrl: data.logoUrl || data.image || data.imageUrl || data.logo || null,
+        coverImageUrl: data.coverImageUrl || data.coverImage || data.image || data.imageUrl || null,
+        isActive: data.isActive !== undefined ? data.isActive : true,
+        isOpen: data.isOpen !== undefined ? data.isOpen : true,
+        vendorType: data.vendorType || 'restaurant',
+        address: data.address || null,
+        city: data.city || null,
+        latitude: safeParseFloat(data.latitude),
+        longitude: safeParseFloat(data.longitude),
+        deliveryRadiusKm: safeParseFloat(data.deliveryRadiusKm),
+        deliveryTimeMin: safeParseInt(data.deliveryTimeMin),
+        deliveryTimeMax: safeParseInt(data.deliveryTimeMax),
+        deliveryFeeMode: data.deliveryFeeMode || null,
+        deliveryFee: safeParseFloat(data.deliveryFee, 0.0)!,
+        minimumOrder: safeParseFloat(data.minimumOrder, 0.0)!,
+        deliveryFeeFormula: data.deliveryFeeFormula || null,
+        deliveryFeeTiers: data.deliveryFeeTiers || null,
+      };
+
+      if (existing) {
+        await this.prisma.restaurant.update({
+          where: { id: existing.id },
+          data: {
+            ...restaurantData,
+            firebaseId: doc.id,
+          }
+        });
+      } else {
+        await this.prisma.restaurant.create({
+          data: {
+            ...restaurantData,
+            id: doc.id,
+            firebaseId: doc.id,
+            ownerId: ownerId,
+            status: 'ACTIVE',
+          }
+        });
+      }
 
       // Success log removed to prevent spam
 
@@ -808,38 +819,49 @@ export class FirebaseSyncService implements OnModuleInit {
       }
 
       // Loop prevention check
-      const existing = await this.prisma.menuSection.findUnique({
-        where: { firebaseId: doc.id }
+      const existing = await this.prisma.menuSection.findFirst({
+        where: {
+          OR: [
+            { firebaseId: doc.id },
+            { id: doc.id }
+          ]
+        }
       });
 
       if (existing) {
         const isNameEqual = existing.name === (data.name || 'Synced Section') && existing.nameAr === (data.nameAr || null);
         const isActiveEqual = existing.isActive === (data.isActive !== undefined ? data.isActive : true);
         const isSortEqual = existing.sortOrder === (data.sortOrder || 0);
+        const isFirebaseIdEqual = existing.firebaseId === doc.id;
 
-        if (isNameEqual && isActiveEqual && isSortEqual) {
+        if (isNameEqual && isActiveEqual && isSortEqual && isFirebaseIdEqual) {
           // Identical, skip updates to prevent infinite loops
           return;
         }
-      }
 
-      await this.prisma.menuSection.upsert({
-        where: { firebaseId: doc.id },
-        update: {
-          name: data.name || 'Synced Section',
-          nameAr: data.nameAr || null,
-          isActive: data.isActive !== undefined ? data.isActive : true,
-          sortOrder: data.sortOrder || 0,
-        },
-        create: {
-          firebaseId: doc.id,
-          restaurantId: restaurant.id,
-          name: data.name || 'Synced Section',
-          nameAr: data.nameAr || null,
-          isActive: data.isActive !== undefined ? data.isActive : true,
-          sortOrder: data.sortOrder || 0,
-        }
-      });
+        await this.prisma.menuSection.update({
+          where: { id: existing.id },
+          data: {
+            firebaseId: doc.id,
+            name: data.name || 'Synced Section',
+            nameAr: data.nameAr || null,
+            isActive: data.isActive !== undefined ? data.isActive : true,
+            sortOrder: data.sortOrder || 0,
+          }
+        });
+      } else {
+        await this.prisma.menuSection.create({
+          data: {
+            id: doc.id,
+            firebaseId: doc.id,
+            restaurantId: restaurant.id,
+            name: data.name || 'Synced Section',
+            nameAr: data.nameAr || null,
+            isActive: data.isActive !== undefined ? data.isActive : true,
+            sortOrder: data.sortOrder || 0,
+          }
+        });
+      }
     } catch (error) {
       this.logger.error(`Error syncing menu section ${doc.id}:`, error);
     }
@@ -862,8 +884,13 @@ export class FirebaseSyncService implements OnModuleInit {
       }
 
       // Loop prevention check
-      const existing = await this.prisma.foodItem.findUnique({
-        where: { firebaseId: doc.id },
+      const existing = await this.prisma.foodItem.findFirst({
+        where: {
+          OR: [
+            { firebaseId: doc.id },
+            { id: doc.id }
+          ]
+        },
         include: { variants: true }
       });
 
@@ -873,6 +900,7 @@ export class FirebaseSyncService implements OnModuleInit {
         const isPriceEqual = existing.price === (data.price || data.unitPrice || 0) && existing.originalPrice === (data.originalPrice || null);
         const isAvailableEqual = existing.isAvailable === (data.isAvailable !== undefined ? data.isAvailable : true);
         const isStockEqual = existing.stockQuantity === (data.stockQuantity || 0);
+        const isFirebaseIdEqual = existing.firebaseId === doc.id;
         const isFractionEqual = existing.hasFractions === (data.hasFractions || false) &&
                                  existing.fractionUnitName === (data.fractionUnitName || null) &&
                                  existing.fractionUnitNameAr === (data.fractionUnitNameAr || null) &&
@@ -909,60 +937,53 @@ export class FirebaseSyncService implements OnModuleInit {
           }
         }
 
-        if (isNameEqual && isDescEqual && isPriceEqual && isAvailableEqual && isStockEqual && isFractionEqual && isVariantsEqual) {
+        if (isNameEqual && isDescEqual && isPriceEqual && isAvailableEqual && isStockEqual && isFractionEqual && isVariantsEqual && isFirebaseIdEqual) {
           // Fields are identical! Skip PG update to prevent infinite loops.
           return;
         }
       }
 
-      // Upsert the food item
-      const foodItem = await this.prisma.foodItem.upsert({
-        where: { firebaseId: doc.id },
-        update: {
-          name: data.name || 'Synced Item',
-          nameAr: data.nameAr || null,
-          description: data.description || null,
-          descriptionAr: data.descriptionAr || null,
-          imageUrl: data.imageUrl || data.image || data.itemImage || null,
-          price: data.price || data.unitPrice || 0,
-          originalPrice: data.originalPrice || null,
-          isAvailable: data.isAvailable !== undefined ? data.isAvailable : true,
-          stockQuantity: data.stockQuantity || 0,
-          hasFractions: data.hasFractions || false,
-          fractionUnitName: data.fractionUnitName || null,
-          fractionUnitNameAr: data.fractionUnitNameAr || null,
-          unitsPerParent: data.unitsPerParent || null,
-          fractionPrice: data.fractionPrice || null,
-          addons: data.addons || data.addonGroups || null,
-          allergens: data.allergens || [],
-          prepTimeMin: data.prepTimeMin || 10,
-          unit: data.unit || null,
-          tags: data.tags || [],
-        },
-        create: {
-          firebaseId: doc.id,
-          sectionId: section.id,
-          name: data.name || 'Synced Item',
-          nameAr: data.nameAr || null,
-          description: data.description || null,
-          descriptionAr: data.descriptionAr || null,
-          imageUrl: data.imageUrl || data.image || data.itemImage || null,
-          price: data.price || data.unitPrice || 0,
-          originalPrice: data.originalPrice || null,
-          isAvailable: data.isAvailable !== undefined ? data.isAvailable : true,
-          stockQuantity: data.stockQuantity || 0,
-          hasFractions: data.hasFractions || false,
-          fractionUnitName: data.fractionUnitName || null,
-          fractionUnitNameAr: data.fractionUnitNameAr || null,
-          unitsPerParent: data.unitsPerParent || null,
-          fractionPrice: data.fractionPrice || null,
-          addons: data.addons || data.addonGroups || null,
-          allergens: data.allergens || [],
-          prepTimeMin: data.prepTimeMin || 10,
-          unit: data.unit || null,
-          tags: data.tags || [],
-        }
-      });
+      const foodItemData = {
+        name: data.name || 'Synced Item',
+        nameAr: data.nameAr || null,
+        description: data.description || null,
+        descriptionAr: data.descriptionAr || null,
+        imageUrl: data.imageUrl || data.image || data.itemImage || null,
+        price: data.price || data.unitPrice || 0,
+        originalPrice: data.originalPrice || null,
+        isAvailable: data.isAvailable !== undefined ? data.isAvailable : true,
+        stockQuantity: data.stockQuantity || 0,
+        hasFractions: data.hasFractions || false,
+        fractionUnitName: data.fractionUnitName || null,
+        fractionUnitNameAr: data.fractionUnitNameAr || null,
+        unitsPerParent: data.unitsPerParent || null,
+        fractionPrice: data.fractionPrice || null,
+        addons: data.addons || data.addonGroups || null,
+        allergens: data.allergens || [],
+        prepTimeMin: data.prepTimeMin || 10,
+        unit: data.unit || null,
+        tags: data.tags || [],
+      };
+
+      let foodItem;
+      if (existing) {
+        foodItem = await this.prisma.foodItem.update({
+          where: { id: existing.id },
+          data: {
+            ...foodItemData,
+            firebaseId: doc.id,
+          }
+        });
+      } else {
+        foodItem = await this.prisma.foodItem.create({
+          data: {
+            ...foodItemData,
+            id: doc.id,
+            firebaseId: doc.id,
+            sectionId: section.id,
+          }
+        });
+      }
 
       // Synchronize variants
       if (data.variants && Array.isArray(data.variants)) {

@@ -50,6 +50,38 @@ export class PrismaService
               return query(args);
             }
 
+            // Intercept create/createMany/upsert to populate firebaseId with id (generated UUID if not provided)
+            if (['Restaurant', 'MenuSection', 'FoodItem', 'FoodItemVariant'].includes(model)) {
+              const crypto = require('crypto');
+              if (operation === 'create') {
+                const data = args.data as any;
+                if (data && !data.firebaseId) {
+                  const id = data.id || crypto.randomUUID();
+                  data.id = id;
+                  data.firebaseId = id;
+                }
+              } else if (operation === 'createMany' || operation === 'createManyAndReturn') {
+                if (args.data) {
+                  const items = Array.isArray(args.data) ? args.data : [args.data];
+                  for (const item of items) {
+                    const itemAny = item as any;
+                    if (!itemAny.firebaseId) {
+                      const id = itemAny.id || crypto.randomUUID();
+                      itemAny.id = id;
+                      itemAny.firebaseId = id;
+                    }
+                  }
+                }
+              } else if (operation === 'upsert') {
+                const createData = args.create as any;
+                if (createData && !createData.firebaseId) {
+                  const id = createData.id || crypto.randomUUID();
+                  createData.id = id;
+                  createData.firebaseId = id;
+                }
+              }
+            }
+
             let preDeleteData: any = null;
 
             if (operation === 'delete' || operation === 'deleteMany') {

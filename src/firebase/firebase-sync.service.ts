@@ -153,7 +153,12 @@ export class FirebaseSyncService implements OnModuleInit {
           } else if (change.type === 'removed') {
             await this.prisma.runWithBypassSync(async () => {
               await this.prisma.user.updateMany({
-                where: { firebaseUid: uid },
+                where: {
+                  OR: [
+                    { firebaseUid: uid },
+                    { id: uid }
+                  ]
+                },
                 data: { status: AccountStatus.BANNED, deletedAt: new Date() },
               });
             });
@@ -187,7 +192,12 @@ export class FirebaseSyncService implements OnModuleInit {
           } else if (change.type === 'removed') {
             await this.prisma.runWithBypassSync(async () => {
               await this.prisma.restaurant.updateMany({
-                where: { firebaseId: id },
+                where: {
+                  OR: [
+                    { firebaseId: id },
+                    { id: id }
+                  ]
+                },
                 data: { status: AccountStatus.INACTIVE, isActive: false },
               });
             });
@@ -321,13 +331,19 @@ export class FirebaseSyncService implements OnModuleInit {
       }
 
       const existingRestaurant = await this.prisma.restaurant.findFirst({
-        where: { firebaseId: firebaseId }
+        where: {
+          OR: [
+            { firebaseId: firebaseId },
+            { id: firebaseId }
+          ]
+        }
       });
 
       if (!existingRestaurant) {
         await this.prisma.restaurant.create({
           data: {
             firebaseId: firebaseId,
+            id: firebaseId,
             ownerId: owner.id,
             name: data.name || 'New Restaurant',
             nameAr: data.nameAr || null,
@@ -347,6 +363,7 @@ export class FirebaseSyncService implements OnModuleInit {
         await this.prisma.restaurant.update({
           where: { id: existingRestaurant.id },
           data: {
+            firebaseId: firebaseId,
             name: data.name || existingRestaurant.name,
             nameAr: data.nameAr || existingRestaurant.nameAr,
             status: status,

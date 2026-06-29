@@ -50,3 +50,8 @@ lerna-debug.log*
 /uploads
 /docs/firebase-admin.json
 /docs/firebase_full_export.json
+
+# Local folders to ignore
+/scratch/
+/docs/
+/scripts/

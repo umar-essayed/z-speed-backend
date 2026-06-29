@@ -327,4 +327,20 @@ export class AdminController {
   ) {
     return this.adminService.adjustWalletBalanceManually(currentUser.userId, dto);
   }
+
+  // =============================================
+  // VENDOR SYNC COMPARISON & RESOLUTION
+  // =============================================
+
+  @Get('sync/compare/:restaurantId')
+  async compareVendorSync(@Param('restaurantId') restaurantId: string) {
+    return this.adminService.compareVendorSync(restaurantId);
+  }
+
+  @Post('sync/resolve')
+  async resolveVendorSync(
+    @Body() dto: { restaurantId: string; action: string; targetId: string },
+  ) {
+    return this.adminService.resolveVendorSync(dto.restaurantId, dto.action, dto.targetId);
+  }
 }

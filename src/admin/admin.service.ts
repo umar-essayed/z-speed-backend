@@ -2432,4 +2432,369 @@ export class AdminService {
       this.logger.error(`Failed to sync wallet balance to Firebase for user ${userId}: ${error.message}`);
     }
   }
+
+  // =============================================
+  // VENDOR SYNC COMPARISON & RESOLUTION
+  // =============================================
+
+  async compareVendorSync(restaurantId: string) {
+    const restaurant = await this.prisma.restaurant.findFirst({
+      where: { id: restaurantId },
+    });
+    if (!restaurant) {
+      throw new NotFoundException('Restaurant not found in Postgres');
+    }
+
+    const firebaseId = restaurant.firebaseId || restaurant.id;
+    const db = this.firebase.getFirestore();
+
+    // 1. Fetch Postgres categories and items
+    const pgSections = (await this.prisma.menuSection.findMany({
+      where: { restaurantId: restaurant.id },
+      include: {
+        items: {
+          include: { variants: true },
+        },
+      },
+    })) as any[];
+
+    // 2. Fetch Firestore categories and items
+    const sectionsSnapshot = await db
+      .collection('restaurants')
+      .doc(firebaseId)
+      .collection('menuSections')
+      .get()
+      .catch(() => ({ docs: [] } as any));
+
+    const itemsPromises = sectionsSnapshot.docs.map(async (secDoc: any) => {
+      const itemsSnap = await secDoc.ref.collection('items').get().catch(() => ({ docs: [] }));
+      return {
+        sectionId: secDoc.id,
+        items: itemsSnap.docs.map((itemDoc: any) => ({ id: itemDoc.id, ...itemDoc.data() })),
+      };
+    });
+
+    const sectionsItems = await Promise.all(itemsPromises);
+
+    const fsSections = sectionsSnapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
+    const fsItems = sectionsItems.flatMap((si: any) => si.items.map((item: any) => ({ ...item, sectionId: si.sectionId })));
+
+    const discrepancies: any[] = [];
+
+    // Compare Menu Sections (PG -> FS)
+    for (const pgSec of pgSections) {
+      const fsSec = fsSections.find((s: any) => s.id === pgSec.firebaseId || s.id === pgSec.id) as any;
+      if (!fsSec) {
+        discrepancies.push({
+          type: 'section',
+          targetId: pgSec.id,
+          name: pgSec.name,
+          issue: 'section_missing_in_firestore',
+          details: `المجلد "${pgSec.name}" موجود في بوستجرس ولكنه مفقود في فايربيز.`,
+          allowedActions: ['push_section_to_firestore'],
+        });
+      } else {
+        const nameMismatched = pgSec.name !== fsSec.name || pgSec.nameAr !== (fsSec.nameAr || null);
+        const activeMismatched = pgSec.isActive !== (fsSec.isActive ?? true);
+        if (nameMismatched || activeMismatched) {
+          discrepancies.push({
+            type: 'section',
+            targetId: pgSec.id,
+            name: pgSec.name,
+            issue: 'section_mismatch',
+            details: `تفاصيل القسم غير متطابقة (الاسم أو الحالة).`,
+            allowedActions: ['sync_section_to_firestore', 'sync_section_to_postgres'],
+            diff: {
+              postgres: { name: pgSec.name, nameAr: pgSec.nameAr, isActive: pgSec.isActive },
+              firebase: { name: fsSec.name, nameAr: fsSec.nameAr, isActive: fsSec.isActive },
+            },
+          });
+        }
+      }
+    }
+
+    // Compare Menu Sections (FS -> PG)
+    for (const fsSec of fsSections) {
+      const pgSec = pgSections.find((s: any) => s.firebaseId === fsSec.id || s.id === fsSec.id);
+      if (!pgSec) {
+        discrepancies.push({
+          type: 'section',
+          targetId: fsSec.id,
+          name: fsSec.name,
+          issue: 'section_missing_in_postgres',
+          details: `المجلد "${fsSec.name}" موجود في فايربيز ولكنه مفقود في بوستجرس.`,
+          allowedActions: ['pull_section_to_postgres', 'delete_section_from_firestore'],
+        });
+      }
+    }
+
+    // Compare Food Items (PG -> FS)
+    for (const pgSec of pgSections) {
+      for (const pgItem of pgSec.items) {
+        const fsItem = fsItems.find((i: any) => i.id === pgItem.firebaseId || i.id === pgItem.id) as any;
+        if (!fsItem) {
+          discrepancies.push({
+            type: 'item',
+            targetId: pgItem.id,
+            name: pgItem.name,
+            sectionId: pgSec.id,
+            issue: 'item_missing_in_firestore',
+            details: `المنتج "${pgItem.name}" موجود في بوستجرس ومفقود في فايربيز.`,
+            allowedActions: ['push_item_to_firestore'],
+          });
+        } else {
+          // Compare item properties
+          const priceMismatched = Number(pgItem.price) !== Number(fsItem.price);
+          const nameMismatched = pgItem.name !== fsItem.name || pgItem.nameAr !== (fsItem.nameAr || null);
+          const availMismatched = pgItem.isAvailable !== (fsItem.isAvailable ?? true);
+          const stockMismatched = pgItem.stockQuantity !== (fsItem.stockQuantity ?? 0);
+
+          if (priceMismatched || nameMismatched || availMismatched || stockMismatched) {
+            discrepancies.push({
+              type: 'item',
+              targetId: pgItem.id,
+              name: pgItem.name,
+              sectionId: pgSec.id,
+              issue: 'item_mismatch',
+              details: `بيانات المنتج غير متطابقة (الاسم، السعر، المخزون، أو التوفر).`,
+              allowedActions: ['sync_item_to_firestore', 'sync_item_to_postgres'],
+              diff: {
+                postgres: { name: pgItem.name, price: pgItem.price, isAvailable: pgItem.isAvailable, stockQuantity: pgItem.stockQuantity },
+                firebase: { name: fsItem.name, price: fsItem.price, isAvailable: fsItem.isAvailable, stockQuantity: fsItem.stockQuantity },
+              },
+            });
+          }
+        }
+      }
+    }
+
+    // Compare Food Items (FS -> PG)
+    for (const fsItem of fsItems) {
+      const pgItem = pgSections.flatMap((s: any) => s.items).find((i: any) => i.firebaseId === fsItem.id || i.id === fsItem.id);
+      if (!pgItem) {
+        discrepancies.push({
+          type: 'item',
+          targetId: fsItem.id,
+          name: fsItem.name,
+          sectionId: fsItem.sectionId,
+          issue: 'item_missing_in_postgres',
+          details: `المنتج "${fsItem.name}" موجود في فايربيز ومفقود في بوستجرس.`,
+          allowedActions: ['pull_item_to_postgres', 'delete_item_from_firestore'],
+        });
+      }
+    }
+
+    return {
+      restaurantId,
+      restaurantName: restaurant.name,
+      firebaseId,
+      postgresCount: pgSections.flatMap((s: any) => s.items).length,
+      firebaseCount: fsItems.length,
+      discrepancies,
+    };
+  }
+
+  async resolveVendorSync(restaurantId: string, action: string, targetId: string) {
+    const restaurant = await this.prisma.restaurant.findUnique({
+      where: { id: restaurantId },
+    });
+    if (!restaurant) {
+      throw new NotFoundException('Restaurant not found in Postgres');
+    }
+
+    const firebaseId = restaurant.firebaseId || restaurant.id;
+    const db = this.firebase.getFirestore();
+
+    switch (action) {
+      case 'push_section_to_firestore': {
+        const section = await this.prisma.menuSection.findUnique({
+          where: { id: targetId },
+        });
+        if (!section) throw new NotFoundException('Section not found');
+        await db.collection('restaurants').doc(firebaseId).collection('menuSections').doc(section.id).set({
+          id: section.id,
+          restaurantId: firebaseId,
+          name: section.name,
+          nameAr: section.nameAr || null,
+          isActive: section.isActive,
+          sortOrder: section.sortOrder,
+          updatedAt: new Date(),
+        });
+        break;
+      }
+
+      case 'pull_section_to_postgres': {
+        const secDoc = await db.collection('restaurants').doc(firebaseId).collection('menuSections').doc(targetId).get();
+        if (!secDoc.exists) throw new NotFoundException('Section not found in Firestore');
+        const data = secDoc.data();
+        if (!data) throw new NotFoundException('Section data is empty');
+        await this.prisma.runWithBypassSync(async () => {
+          await this.prisma.menuSection.create({
+            data: {
+              id: targetId,
+              firebaseId: targetId,
+              restaurantId,
+              name: data.name || 'New Section',
+              nameAr: data.nameAr || null,
+              isActive: data.isActive !== undefined ? data.isActive : true,
+              sortOrder: data.sortOrder || 0,
+            },
+          });
+        });
+        break;
+      }
+
+      case 'delete_section_from_firestore': {
+        // Delete items subcollection first
+        const itemsSnapshot = await db.collection('restaurants').doc(firebaseId).collection('menuSections').doc(targetId).collection('items').get();
+        for (const itemDoc of itemsSnapshot.docs) {
+          await itemDoc.ref.delete();
+        }
+        await db.collection('restaurants').doc(firebaseId).collection('menuSections').doc(targetId).delete();
+        break;
+      }
+
+      case 'push_item_to_firestore': {
+        const item = (await this.prisma.foodItem.findUnique({
+          where: { id: targetId },
+          include: { section: true, variants: true },
+        })) as any;
+        if (!item) throw new NotFoundException('Item not found');
+        const sectionFirebaseId = item.section?.firebaseId || item.sectionId;
+
+        const syncData = {
+          id: item.id,
+          sectionId: sectionFirebaseId,
+          restaurantId: firebaseId,
+          name: item.name,
+          nameAr: item.nameAr || null,
+          description: item.description || null,
+          descriptionAr: item.descriptionAr || null,
+          imageUrl: item.imageUrl || null,
+          price: Number(item.price),
+          originalPrice: item.originalPrice ? Number(item.originalPrice) : null,
+          isAvailable: item.isAvailable,
+          stockQuantity: item.stockQuantity,
+          hasFractions: item.hasFractions,
+          fractionUnitName: item.fractionUnitName || null,
+          fractionUnitNameAr: item.fractionUnitNameAr || null,
+          unitsPerParent: item.unitsPerParent || null,
+          fractionPrice: item.fractionPrice ? Number(item.fractionPrice) : null,
+          addons: item.addons || null,
+          allergens: item.allergens || [],
+          prepTimeMin: item.prepTimeMin,
+          unit: item.unit || null,
+          tags: item.tags || [],
+          updatedAt: new Date(),
+          variants: item.variants.map((v: any) => ({
+            id: v.firebaseId || v.id,
+            foodItemId: v.foodItemId,
+            name: v.name,
+            nameAr: v.nameAr || null,
+            price: Number(v.price),
+            originalPrice: v.originalPrice ? Number(v.originalPrice) : null,
+            stockQuantity: v.stockQuantity,
+            isAvailable: v.isAvailable,
+            isFraction: v.isFraction,
+            fractionMultiplier: v.fractionMultiplier ? Number(v.fractionMultiplier) : null,
+          })),
+        };
+        await db.collection('restaurants').doc(firebaseId).collection('menuSections').doc(sectionFirebaseId).collection('items').doc(item.id).set(syncData, { merge: true });
+        break;
+      }
+
+      case 'pull_item_to_postgres': {
+        // We need to query Firestore items collection across all sections
+        const sectionsSnapshot = await db.collection('restaurants').doc(firebaseId).collection('menuSections').get();
+        let itemDoc: any = null;
+        let foundSectionId = '';
+        for (const secDoc of sectionsSnapshot.docs) {
+          const doc = await secDoc.ref.collection('items').doc(targetId).get();
+          if (doc.exists) {
+            itemDoc = doc;
+            foundSectionId = secDoc.id;
+            break;
+          }
+        }
+        if (!itemDoc) throw new NotFoundException('Item not found in Firestore');
+        
+        const data = itemDoc.data();
+        if (!data) throw new NotFoundException('Item data is empty');
+        // Resolve Postgres Section
+        let pgSection = await this.prisma.menuSection.findFirst({
+          where: { OR: [{ firebaseId: foundSectionId }, { id: foundSectionId }] }
+        });
+        if (!pgSection) {
+          // Pull section first
+          const secDoc = await db.collection('restaurants').doc(firebaseId).collection('menuSections').doc(foundSectionId).get();
+          const secData = secDoc.data();
+          if (!secData) throw new NotFoundException('Section data is empty');
+          pgSection = await this.prisma.runWithBypassSync(async () => {
+            return this.prisma.menuSection.create({
+              data: {
+                id: foundSectionId,
+                firebaseId: foundSectionId,
+                restaurantId,
+                name: secData.name || 'New Section',
+                isActive: secData.isActive !== undefined ? secData.isActive : true,
+              }
+            });
+          });
+        }
+
+        await this.prisma.runWithBypassSync(async () => {
+          await this.prisma.foodItem.upsert({
+            where: { id: targetId },
+            update: {
+              name: data.name || 'New Item',
+              nameAr: data.nameAr || null,
+              description: data.description || null,
+              descriptionAr: data.descriptionAr || null,
+              price: data.price || 0,
+              originalPrice: data.originalPrice || null,
+              isAvailable: data.isAvailable !== undefined ? data.isAvailable : true,
+              stockQuantity: data.stockQuantity || 0,
+            },
+            create: {
+              id: targetId,
+              firebaseId: targetId,
+              sectionId: pgSection.id,
+              name: data.name || 'New Item',
+              nameAr: data.nameAr || null,
+              description: data.description || null,
+              descriptionAr: data.descriptionAr || null,
+              price: data.price || 0,
+              originalPrice: data.originalPrice || null,
+              isAvailable: data.isAvailable !== undefined ? data.isAvailable : true,
+              stockQuantity: data.stockQuantity || 0,
+            }
+          });
+        });
+        break;
+      }
+
+      case 'delete_item_from_firestore': {
+        const sectionsSnapshot = await db.collection('restaurants').doc(firebaseId).collection('menuSections').get();
+        for (const secDoc of sectionsSnapshot.docs) {
+          await secDoc.ref.collection('items').doc(targetId).delete().catch(() => {});
+        }
+        break;
+      }
+
+      case 'sync_item_to_firestore': {
+        await this.resolveVendorSync(restaurantId, 'push_item_to_firestore', targetId);
+        break;
+      }
+
+      case 'sync_item_to_postgres': {
+        await this.resolveVendorSync(restaurantId, 'pull_item_to_postgres', targetId);
+        break;
+      }
+
+      default:
+        throw new BadRequestException(`Unknown resolution action: ${action}`);
+    }
+
+    return { success: true, message: `Completed action ${action} for target ${targetId}` };
+  }
 }

@@ -55,3 +55,4 @@ lerna-debug.log*
 /scratch/
 /docs/
 /scripts/
+/test/

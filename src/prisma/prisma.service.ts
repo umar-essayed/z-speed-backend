@@ -87,17 +87,17 @@ export class PrismaService
             if (operation === 'delete' || operation === 'deleteMany') {
               try {
                 if (model === 'MenuSection') {
-                  preDeleteData = await self.menuSection.findFirst({
+                  preDeleteData = await self.menuSection.findMany({
                     where: args.where,
                     select: { id: true, restaurantId: true }
                   });
                 } else if (model === 'FoodItem') {
-                  preDeleteData = await self.foodItem.findFirst({
+                  preDeleteData = await self.foodItem.findMany({
                     where: args.where,
                     select: { id: true, sectionId: true }
                   });
                 } else if (model === 'FoodItemVariant') {
-                  preDeleteData = await self.foodItemVariant.findFirst({
+                  preDeleteData = await self.foodItemVariant.findMany({
                     where: args.where,
                     select: { id: true, foodItemId: true }
                   });
@@ -115,7 +115,9 @@ export class PrismaService
               'MenuSection', 'FoodItem', 'FoodItemVariant', 'SystemConfig'
             ]);
 
-            if (SYNCED_MODELS.has(model)) {
+            const syncBackendToFirebase = process.env.SYNC_BACKEND_TO_FIREBASE !== 'false';
+
+            if (syncBackendToFirebase && SYNCED_MODELS.has(model)) {
               setImmediate(async () => {
                 try {
                   if (admin.apps.length) {
@@ -311,16 +313,19 @@ export class PrismaService
     let sectionId = result?.firebaseId || result?.id;
 
     if (action === 'delete' || action === 'deleteMany') {
-      restaurantId = preDeleteData?.restaurantId;
-      sectionId = preDeleteData?.id;
-      if (restaurantId && sectionId) {
-        const restaurant = await this.restaurant.findUnique({
-          where: { id: restaurantId },
-          select: { firebaseId: true }
-        }).catch(() => null);
-        const firestoreRestaurantId = restaurant?.firebaseId || restaurantId;
+      const items = Array.isArray(preDeleteData) ? preDeleteData : (preDeleteData ? [preDeleteData] : []);
+      for (const item of items) {
+        const rId = item?.restaurantId;
+        const sId = item?.id;
+        if (rId && sId) {
+          const restaurant = await this.restaurant.findUnique({
+            where: { id: rId },
+            select: { firebaseId: true }
+          }).catch(() => null);
+          const firestoreRestaurantId = restaurant?.firebaseId || rId;
 
-        await db.collection('restaurants').doc(firestoreRestaurantId).collection('menuSections').doc(sectionId).delete().catch(() => {});
+          await db.collection('restaurants').doc(firestoreRestaurantId).collection('menuSections').doc(sId).delete().catch(() => {});
+        }
       }
       return;
     }
@@ -350,27 +355,30 @@ export class PrismaService
     let itemId = result?.firebaseId || result?.id;
 
     if (action === 'delete' || action === 'deleteMany') {
-      sectionId = preDeleteData?.sectionId;
-      itemId = preDeleteData?.id;
-      if (sectionId && itemId) {
-        const section = await this.menuSection.findUnique({
-          where: { id: sectionId },
-          select: { 
-            restaurantId: true, 
-            firebaseId: true,
-            restaurant: { select: { firebaseId: true } }
-          }
-        }).catch(() => null);
-        
-        const restaurantId = section?.restaurantId;
-        const firestoreRestaurantId = section?.restaurant?.firebaseId || restaurantId;
-        const firestoreSectionId = section?.firebaseId || sectionId;
+      const items = Array.isArray(preDeleteData) ? preDeleteData : (preDeleteData ? [preDeleteData] : []);
+      for (const item of items) {
+        const sId = item?.sectionId;
+        const iId = item?.id;
+        if (sId && iId) {
+          const section = await this.menuSection.findUnique({
+            where: { id: sId },
+            select: { 
+              restaurantId: true, 
+              firebaseId: true,
+              restaurant: { select: { firebaseId: true } }
+            }
+          }).catch(() => null);
+          
+          const restaurantId = section?.restaurantId;
+          const firestoreRestaurantId = section?.restaurant?.firebaseId || restaurantId;
+          const firestoreSectionId = section?.firebaseId || sId;
 
-        if (firestoreRestaurantId && firestoreSectionId) {
-          await db.collection('restaurants').doc(firestoreRestaurantId)
-            .collection('menuSections').doc(firestoreSectionId)
-            .collection('items').doc(itemId)
-            .delete().catch(() => {});
+          if (firestoreRestaurantId && firestoreSectionId) {
+            await db.collection('restaurants').doc(firestoreRestaurantId)
+              .collection('menuSections').doc(firestoreSectionId)
+              .collection('items').doc(iId)
+              .delete().catch(() => {});
+          }
         }
       }
       return;
@@ -445,21 +453,24 @@ export class PrismaService
   }
 
   private async syncFoodItemVariantToFirestore(db: any, action: string, params: any, result: any, preDeleteData: any) {
-    let foodItemId = result?.foodItemId;
+    let foodItemIds: string[] = [];
+
     if (action === 'delete' || action === 'deleteMany') {
-      foodItemId = preDeleteData?.foodItemId;
-    }
-    
-    // Support createMany / updateMany operations where foodItemId is inside the array/object of args.data
-    if (!foodItemId && params?.args?.data) {
-      if (Array.isArray(params.args.data)) {
-        foodItemId = params.args.data[0]?.foodItemId;
-      } else {
-        foodItemId = params.args.data?.foodItemId;
+      const variants = Array.isArray(preDeleteData) ? preDeleteData : (preDeleteData ? [preDeleteData] : []);
+      foodItemIds = Array.from(new Set(variants.map(v => v.foodItemId).filter(Boolean)));
+    } else {
+      let foodItemId = result?.foodItemId;
+      if (!foodItemId && params?.args?.data) {
+        if (Array.isArray(params.args.data)) {
+          foodItemId = params.args.data[0]?.foodItemId;
+        } else {
+          foodItemId = params.args.data?.foodItemId;
+        }
       }
+      if (foodItemId) foodItemIds.push(foodItemId);
     }
     
-    if (foodItemId) {
+    for (const foodItemId of foodItemIds) {
       const foodItem = await this.foodItem.findUnique({
         where: { id: foodItemId }
       });

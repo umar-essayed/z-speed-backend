@@ -1,12 +1,14 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { FirebaseAdminService } from './firebase-admin.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccountStatus, Role } from '@prisma/client';
 import { Cron, CronExpression } from '@nestjs/schedule';
 
 @Injectable()
-export class FirebaseSyncService implements OnModuleInit {
+export class FirebaseSyncService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(FirebaseSyncService.name);
+  private usersUnsubscribe: (() => void) | null = null;
+  private restaurantsUnsubscribe: (() => void) | null = null;
 
   constructor(
     private readonly firebaseAdmin: FirebaseAdminService,
@@ -14,6 +16,12 @@ export class FirebaseSyncService implements OnModuleInit {
   ) {}
 
   onModuleInit() {
+    const syncFirebaseToBackend = process.env.SYNC_FIREBASE_TO_BACKEND !== 'false';
+    if (!syncFirebaseToBackend) {
+      this.logger.log('Firebase to Backend synchronization is disabled via SYNC_FIREBASE_TO_BACKEND env variable.');
+      return;
+    }
+
     this.logger.log('Initializing Firebase real-time listeners...');
     try {
       this.setupRealtimeListeners();
@@ -32,11 +40,26 @@ export class FirebaseSyncService implements OnModuleInit {
     }
   }
 
+  onModuleDestroy() {
+    this.logger.log('Cleaning up Firebase real-time listeners...');
+    if (this.usersUnsubscribe) {
+      this.usersUnsubscribe();
+      this.usersUnsubscribe = null;
+    }
+    if (this.restaurantsUnsubscribe) {
+      this.restaurantsUnsubscribe();
+      this.restaurantsUnsubscribe = null;
+    }
+  }
+
   /**
    * Sync all existing data and reconcile deletions from Firebase to PostgreSQL (scheduled every 12 hours at 3:00 AM and 3:00 PM)
    */
   @Cron('0 3,15 * * *')
   async syncAllData() {
+    const syncFirebaseToBackend = process.env.SYNC_FIREBASE_TO_BACKEND !== 'false';
+    if (!syncFirebaseToBackend) return;
+
     const firestore = this.firebaseAdmin.getFirestore();
     const auth = this.firebaseAdmin.getAuth();
     if (!firestore || !auth) {
@@ -133,7 +156,7 @@ export class FirebaseSyncService implements OnModuleInit {
 
     // Listen to changes in the 'users' collection
     let isUsersInitial = true;
-    firestore.collection('users').onSnapshot(
+    this.usersUnsubscribe = firestore.collection('users').onSnapshot(
       async (snapshot) => {
         const changes = snapshot.docChanges();
         if (isUsersInitial) {
@@ -173,7 +196,7 @@ export class FirebaseSyncService implements OnModuleInit {
 
     // Listen to changes in the 'restaurants' collection
     let isRestaurantsInitial = true;
-    firestore.collection('restaurants').onSnapshot(
+    this.restaurantsUnsubscribe = firestore.collection('restaurants').onSnapshot(
       async (snapshot) => {
         const changes = snapshot.docChanges();
         if (isRestaurantsInitial) {

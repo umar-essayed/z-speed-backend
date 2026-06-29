@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, OnModuleDestroy, Inject, forwardRef } from '@nestjs/common';
 import { FirebaseAdminService } from '../firebase/firebase-admin.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../gateway/realtime.gateway';
@@ -23,8 +23,9 @@ const safeParseInt = (val: any, fallback: number | null = null): number | null =
 };
 
 @Injectable()
-export class FirebaseSyncService implements OnModuleInit {
+export class FirebaseSyncService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(FirebaseSyncService.name);
+  private unsubscribes: (() => void)[] = [];
 
   constructor(
     private readonly firebaseAdmin: FirebaseAdminService,
@@ -38,12 +39,31 @@ export class FirebaseSyncService implements OnModuleInit {
   ) {}
 
   onModuleInit() {
+    const syncFirebaseToBackend = process.env.SYNC_FIREBASE_TO_BACKEND !== 'false';
+    if (!syncFirebaseToBackend) {
+      this.logger.log('Firebase to Backend synchronization is disabled via SYNC_FIREBASE_TO_BACKEND env variable.');
+      return;
+    }
+
     this.logger.log('Initializing Firebase real-time order listeners...');
     this.startListening();
   }
 
+  onModuleDestroy() {
+    this.logger.log('Cleaning up Firebase real-time order listeners...');
+    for (const unsubscribe of this.unsubscribes) {
+      try {
+        unsubscribe();
+      } catch (err) {}
+    }
+    this.unsubscribes = [];
+  }
+
   @Cron('0 3,15 * * *')
   async runPeriodicInitialSyncs() {
+    const syncFirebaseToBackend = process.env.SYNC_FIREBASE_TO_BACKEND !== 'false';
+    if (!syncFirebaseToBackend) return;
+
     this.logger.log('⏰ Starting scheduled 12-hour database sync from Firebase...');
     try {
       await this.initialSyncAddresses();
@@ -67,244 +87,367 @@ export class FirebaseSyncService implements OnModuleInit {
 
     // 1. Listen for new or updated orders in Firebase
     let isOrdersInitial = true;
-    firestore.collection('orders').onSnapshot(async (snapshot) => {
-      const changes = snapshot.docChanges();
-      if (isOrdersInitial) {
-        isOrdersInitial = false;
-        this.logger.log(`[Realtime Listener] Initial snapshot for orders loaded (${changes.length} docs). Skipping historical sync on startup.`);
-        return;
-      }
-      for (const change of changes) {
-        await this.prisma.runWithBypassSync(async () => {
-          const data = change.doc.data();
+    this.unsubscribes.push(
+      firestore.collection('orders').onSnapshot(async (snapshot) => {
+        const changes = snapshot.docChanges();
+        if (isOrdersInitial) {
+          isOrdersInitial = false;
+          this.logger.log(`[Realtime Listener] Initial snapshot for orders loaded (${changes.length} docs). Skipping historical sync on startup.`);
+          return;
+        }
+        for (const change of changes) {
+          await this.prisma.runWithBypassSync(async () => {
+            const data = change.doc.data();
 
-          if (change.type === 'added') {
-            // isNew=true only for orders not yet synced to Postgres (genuine new orders)
-            const isNew = !data.syncedToPostgres;
-            await this.syncOrder(change.doc, !isNew, isNew);
-          } else if (change.type === 'modified') {
-            if (!data.syncedToPostgres) {
-              await this.syncOrder(change.doc, false, false);
-            } else if (data.postgresOrderId) {
-              await this.syncStatusFromFirebase(change.doc);
+            if (change.type === 'added') {
+              // isNew=true only for orders not yet synced to Postgres (genuine new orders)
+              const isNew = !data.syncedToPostgres;
+              await this.syncOrder(change.doc, !isNew, isNew);
+            } else if (change.type === 'modified') {
+              if (!data.syncedToPostgres) {
+                await this.syncOrder(change.doc, false, false);
+              } else if (data.postgresOrderId) {
+                await this.syncStatusFromFirebase(change.doc);
+              }
             }
-          }
-        });
-      }
-    }, (error) => {
-      this.logger.error('Error listening to Firebase orders:', error);
-    });
+          });
+        }
+      }, (error) => {
+        this.logger.error('Error listening to Firebase orders:', error);
+      })
+    );
 
     // 2. Listen for restaurant changes in Firebase
     let isRestaurantsInitial = true;
-    firestore.collection('restaurants').onSnapshot(async (snapshot) => {
-      const changes = snapshot.docChanges();
-      if (isRestaurantsInitial) {
-        isRestaurantsInitial = false;
-        this.logger.log(`[Realtime Listener] Initial snapshot for restaurants loaded (${changes.length} docs). Skipping historical sync on startup.`);
-        return;
-      }
-      for (const change of changes) {
-        await this.prisma.runWithBypassSync(async () => {
-          await this.syncRestaurant(change.doc);
-        });
-      }
-    }, (error) => {
-      this.logger.error('Error listening to Firebase restaurants:', error);
-    });
+    this.unsubscribes.push(
+      firestore.collection('restaurants').onSnapshot(async (snapshot) => {
+        const changes = snapshot.docChanges();
+        if (isRestaurantsInitial) {
+          isRestaurantsInitial = false;
+          this.logger.log(`[Realtime Listener] Initial snapshot for restaurants loaded (${changes.length} docs). Skipping historical sync on startup.`);
+          return;
+        }
+        for (const change of changes) {
+          await this.prisma.runWithBypassSync(async () => {
+            await this.syncRestaurant(change.doc);
+          });
+        }
+      }, (error) => {
+        this.logger.error('Error listening to Firebase restaurants:', error);
+      })
+    );
 
     // 3. Listen for menu sections (Collection Group)
     let isMenuSectionsInitial = true;
-    firestore.collectionGroup('menuSections').onSnapshot(async (snapshot) => {
-      const changes = snapshot.docChanges();
-      if (isMenuSectionsInitial) {
-        isMenuSectionsInitial = false;
-        this.logger.log(`[Realtime Listener] Initial snapshot for menu sections loaded (${changes.length} docs). Skipping historical sync on startup.`);
-        return;
-      }
-      for (const change of changes) {
-        await this.prisma.runWithBypassSync(async () => {
-          if (change.type === 'removed') {
-            const fbSectionId = change.doc.id;
-            this.logger.log(`[Realtime Sync] Menu section removed in Firestore: ${fbSectionId}. Deleting from Postgres.`);
-            await this.prisma.menuSection.deleteMany({
-              where: {
-                OR: [
-                  { firebaseId: fbSectionId },
-                  { id: fbSectionId }
-                ]
+    this.unsubscribes.push(
+      firestore.collectionGroup('menuSections').onSnapshot(async (snapshot) => {
+        const changes = snapshot.docChanges();
+        if (isMenuSectionsInitial) {
+          isMenuSectionsInitial = false;
+          this.logger.log(`[Realtime Listener] Initial snapshot for menu sections loaded (${changes.length} docs). Skipping historical sync on startup.`);
+          return;
+        }
+        for (const change of changes) {
+          await this.prisma.runWithBypassSync(async () => {
+            if (change.type === 'removed') {
+              const fbSectionId = change.doc.id;
+              this.logger.log(`[Realtime Sync] Menu section removed in Firestore: ${fbSectionId}. Deleting from Postgres.`);
+              await this.prisma.menuSection.deleteMany({
+                where: {
+                  OR: [
+                    { firebaseId: fbSectionId },
+                    { id: fbSectionId }
+                  ]
+                }
+              }).catch(err => this.logger.error(`Error deleting menu section ${fbSectionId}: ${err.message}`));
+
+              // Clean up items subcollection in Firestore to prevent them from recreating
+              try {
+                const itemsSnapshot = await change.doc.ref.collection('items').get();
+                for (const itemDoc of itemsSnapshot.docs) {
+                  await itemDoc.ref.delete().catch(() => {});
+                }
+              } catch (err) {
+                this.logger.error(`Failed to clean up Firestore items for deleted section ${fbSectionId}: ${err.message}`);
               }
-            }).catch(err => this.logger.error(`Error deleting menu section ${fbSectionId}: ${err.message}`));
-          } else {
-            await this.syncMenuSection(change.doc);
-          }
-        });
-      }
-    }, (error) => {
-      this.logger.error('Error listening to Firebase menu sections:', error);
-    });
+            } else {
+              await this.syncMenuSection(change.doc);
+            }
+          });
+        }
+      }, (error) => {
+        this.logger.error('Error listening to Firebase menu sections:', error);
+      })
+    );
 
     // 4. Listen for food items (Collection Group)
     let isItemsInitial = true;
-    firestore.collectionGroup('items').onSnapshot(async (snapshot) => {
-      const changes = snapshot.docChanges();
-      if (isItemsInitial) {
-        isItemsInitial = false;
-        this.logger.log(`[Realtime Listener] Initial snapshot for items loaded (${changes.length} docs). Skipping historical sync on startup.`);
-        return;
-      }
-      for (const change of changes) {
-        await this.prisma.runWithBypassSync(async () => {
-          if (change.type === 'removed') {
-            const fbItemId = change.doc.id;
-            this.logger.log(`[Realtime Sync] Food item removed in Firestore: ${fbItemId}. Deleting from Postgres.`);
-            await this.prisma.foodItem.deleteMany({
-              where: {
-                OR: [
-                  { firebaseId: fbItemId },
-                  { id: fbItemId }
-                ]
-              }
-            }).catch(err => this.logger.error(`Error deleting food item ${fbItemId}: ${err.message}`));
-          } else {
-            await this.syncFoodItem(change.doc);
-          }
-        });
-      }
-    }, (error) => {
-      this.logger.error('Error listening to Firebase food items:', error);
-    });
+    this.unsubscribes.push(
+      firestore.collectionGroup('items').onSnapshot(async (snapshot) => {
+        const changes = snapshot.docChanges();
+        if (isItemsInitial) {
+          isItemsInitial = false;
+          this.logger.log(`[Realtime Listener] Initial snapshot for items loaded (${changes.length} docs). Skipping historical sync on startup.`);
+          return;
+        }
+        for (const change of changes) {
+          await this.prisma.runWithBypassSync(async () => {
+            if (change.type === 'removed') {
+              const fbItemId = change.doc.id;
+              this.logger.log(`[Realtime Sync] Food item removed in Firestore: ${fbItemId}. Deleting from Postgres.`);
+              await this.prisma.foodItem.deleteMany({
+                where: {
+                  OR: [
+                    { firebaseId: fbItemId },
+                    { id: fbItemId }
+                  ]
+                }
+              }).catch(err => this.logger.error(`Error deleting food item ${fbItemId}: ${err.message}`));
+            } else {
+              await this.syncFoodItem(change.doc);
+            }
+          });
+        }
+      }, (error) => {
+        this.logger.error('Error listening to Firebase food items:', error);
+      })
+    );
 
     // 5. Listen for driver profiles and live locations
     let isDriversInitial = true;
-    firestore.collection('driverProfiles').onSnapshot(async (snapshot) => {
-      const changes = snapshot.docChanges();
-      if (isDriversInitial) {
-        isDriversInitial = false;
-        this.logger.log(`[Realtime Listener] Initial snapshot for driver profiles loaded (${changes.length} docs). Skipping historical sync on startup.`);
-        return;
-      }
-      for (const change of changes) {
-        await this.prisma.runWithBypassSync(async () => {
-          await this.syncDriver(change.doc);
-        });
-      }
-    }, (error) => {
-      this.logger.error('Error listening to Firebase driver profiles:', error);
-    });
+    this.unsubscribes.push(
+      firestore.collection('driverProfiles').onSnapshot(async (snapshot) => {
+        const changes = snapshot.docChanges();
+        if (isDriversInitial) {
+          isDriversInitial = false;
+          this.logger.log(`[Realtime Listener] Initial snapshot for driver profiles loaded (${changes.length} docs). Skipping historical sync on startup.`);
+          return;
+        }
+        for (const change of changes) {
+          await this.prisma.runWithBypassSync(async () => {
+            await this.syncDriver(change.doc);
+          });
+        }
+      }, (error) => {
+        this.logger.error('Error listening to Firebase driver profiles:', error);
+      })
+    );
 
     // 6. Listen for delivery request responses (Driver accepts/rejects)
     let isDeliveryRequestsInitial = true;
-    firestore.collection('deliveryRequests').onSnapshot(async (snapshot) => {
-      const changes = snapshot.docChanges();
-      if (isDeliveryRequestsInitial) {
-        isDeliveryRequestsInitial = false;
-        this.logger.log(`[Realtime Listener] Initial snapshot for delivery requests loaded (${changes.length} docs). Skipping historical sync on startup.`);
-        return;
-      }
-      for (const change of changes) {
-        await this.prisma.runWithBypassSync(async () => {
-          const data = change.doc.data();
-          if (change.type === 'modified' && data.status === 'accepted') {
-            await this.handleDriverAcceptance(data);
-          }
-        });
-      }
-    }, (error) => {
-      this.logger.error('Error listening to Firebase delivery requests:', error);
-    });
+    this.unsubscribes.push(
+      firestore.collection('deliveryRequests').onSnapshot(async (snapshot) => {
+        const changes = snapshot.docChanges();
+        if (isDeliveryRequestsInitial) {
+          isDeliveryRequestsInitial = false;
+          this.logger.log(`[Realtime Listener] Initial snapshot for delivery requests loaded (${changes.length} docs). Skipping historical sync on startup.`);
+          return;
+        }
+        for (const change of changes) {
+          await this.prisma.runWithBypassSync(async () => {
+            const data = change.doc.data();
+            if (change.type === 'modified' && data.status === 'accepted') {
+              await this.handleDriverAcceptance(data);
+            }
+          });
+        }
+      }, (error) => {
+        this.logger.error('Error listening to Firebase delivery requests:', error);
+      })
+    );
 
     // 7. Listen for User Addresses (Collection Group)
     let isAddressesInitial = true;
-    firestore.collectionGroup('addresses').onSnapshot(async (snapshot) => {
-      const changes = snapshot.docChanges();
-      if (isAddressesInitial) {
-        isAddressesInitial = false;
-        this.logger.log(`[Realtime Listener] Initial snapshot for user addresses loaded (${changes.length} docs). Skipping historical sync on startup.`);
-        return;
-      }
-      for (const change of changes) {
-        await this.prisma.runWithBypassSync(async () => {
-          await this.syncUserAddress(change.doc);
-        });
-      }
-    }, (error) => {
-      this.logger.error('Error listening to Firebase user addresses:', error);
-    });
+    this.unsubscribes.push(
+      firestore.collectionGroup('addresses').onSnapshot(async (snapshot) => {
+        const changes = snapshot.docChanges();
+        if (isAddressesInitial) {
+          isAddressesInitial = false;
+          this.logger.log(`[Realtime Listener] Initial snapshot for user addresses loaded (${changes.length} docs). Skipping historical sync on startup.`);
+          return;
+        }
+        for (const change of changes) {
+          await this.prisma.runWithBypassSync(async () => {
+            await this.syncUserAddress(change.doc);
+          });
+        }
+      }, (error) => {
+        this.logger.error('Error listening to Firebase user addresses:', error);
+      })
+    );
 
     // 8. Listen for Users collection changes to synchronize fcmTokens to Postgres
     let isUsersInitial = true;
-    firestore.collection('users').onSnapshot(async (snapshot) => {
-      const changes = snapshot.docChanges();
-      if (isUsersInitial) {
-        isUsersInitial = false;
-        this.logger.log(`[Realtime Listener] Initial snapshot for users loaded (${changes.length} docs). Skipping historical sync on startup.`);
-        return;
-      }
-      for (const change of changes) {
-        await this.prisma.runWithBypassSync(async () => {
-          const uid = change.doc.id;
-          const data = change.doc.data();
-          if (data.fcmTokens && Array.isArray(data.fcmTokens)) {
-            // Find user in PostgreSQL and update fcmTokens
-            const user = await this.prisma.user.findFirst({
-              where: { firebaseUid: uid }
-            });
-            if (user) {
-              await this.prisma.user.update({
-                where: { id: user.id },
-                data: { fcmTokens: data.fcmTokens },
-              }).catch(err => this.logger.error(`Failed to sync fcmTokens for user ${uid}: ${err.message}`));
+    this.unsubscribes.push(
+      firestore.collection('users').onSnapshot(async (snapshot) => {
+        const changes = snapshot.docChanges();
+        if (isUsersInitial) {
+          isUsersInitial = false;
+          this.logger.log(`[Realtime Listener] Initial snapshot for users loaded (${changes.length} docs). Skipping historical sync on startup.`);
+          return;
+        }
+        for (const change of changes) {
+          await this.prisma.runWithBypassSync(async () => {
+            const uid = change.doc.id;
+            const data = change.doc.data();
+            if (data.fcmTokens && Array.isArray(data.fcmTokens)) {
+              // Find user in PostgreSQL and update fcmTokens
+              const user = await this.prisma.user.findFirst({
+                where: { firebaseUid: uid }
+              });
+              if (user) {
+                await this.prisma.user.update({
+                  where: { id: user.id },
+                  data: { fcmTokens: data.fcmTokens },
+                }).catch(err => this.logger.error(`Failed to sync fcmTokens for user ${uid}: ${err.message}`));
+              }
             }
-          }
-        });
-      }
-    }, (error) => {
-      this.logger.error('Error listening to Firebase users:', error);
-    });
+          });
+        }
+      }, (error) => {
+        this.logger.error('Error listening to Firebase users:', error);
+      })
+    );
 
     // 9. Listen for Chats collection changes to send push notifications
     let isChatsInitial = true;
     const lastChatMsgTimeMap = new Map<string, number>();
-    firestore.collection('chats').onSnapshot(async (snapshot) => {
-      const now = Date.now();
-      const changes = snapshot.docChanges();
-      if (isChatsInitial) {
-        isChatsInitial = false;
-        this.logger.log(`[Realtime Listener] Initial snapshot for chats loaded (${changes.length} docs). Skipping historical sync on startup.`);
-        return;
-      }
-      for (const change of changes) {
-        const chatId = change.doc.id;
-        const data = change.doc.data();
-        if (!data || !data.lastMessageAt) continue;
+    this.unsubscribes.push(
+      firestore.collection('chats').onSnapshot(async (snapshot) => {
+        const now = Date.now();
+        const changes = snapshot.docChanges();
+        if (isChatsInitial) {
+          isChatsInitial = false;
+          this.logger.log(`[Realtime Listener] Initial snapshot for chats loaded (${changes.length} docs). Skipping historical sync on startup.`);
+          return;
+        }
+        for (const change of changes) {
+          const chatId = change.doc.id;
+          const data = change.doc.data();
+          if (!data || !data.lastMessageAt) continue;
 
-        const msgTime = typeof data.lastMessageAt.toMillis === 'function'
-          ? data.lastMessageAt.toMillis()
-          : new Date(data.lastMessageAt).getTime();
+          const msgTime = typeof data.lastMessageAt.toMillis === 'function'
+            ? data.lastMessageAt.toMillis()
+            : new Date(data.lastMessageAt).getTime();
 
-        // Avoid triggering historical messages on startup
-        if (now - msgTime > 120000) {
-          const currentSaved = lastChatMsgTimeMap.get(chatId) || 0;
-          if (msgTime > currentSaved) {
-            lastChatMsgTimeMap.set(chatId, msgTime);
+          // Avoid triggering historical messages on startup
+          if (now - msgTime > 120000) {
+            const currentSaved = lastChatMsgTimeMap.get(chatId) || 0;
+            if (msgTime > currentSaved) {
+              lastChatMsgTimeMap.set(chatId, msgTime);
+            }
+            continue;
           }
-          continue;
+
+          const lastProcessed = lastChatMsgTimeMap.get(chatId) || 0;
+          if (msgTime <= lastProcessed) {
+            continue;
+          }
+
+          lastChatMsgTimeMap.set(chatId, msgTime);
+
+          if (change.type === 'added' || change.type === 'modified') {
+            const { customerId, restaurantId, lastMessage, lastMessageSenderId, restaurantName, customerName } = data;
+            if (!lastMessageSenderId || !lastMessage) continue;
+
+            if (lastMessageSenderId === customerId) {
+              // Customer sent the message -> Recipient is the Pharmacy Owner (Vendor)
+              try {
+                const restaurant = await this.prisma.restaurant.findFirst({
+                  where: { firebaseId: restaurantId },
+                  select: { ownerId: true, name: true }
+                });
+
+                if (restaurant && restaurant.ownerId) {
+                  this.logger.log(`Sending Chat Push Notification to Vendor (Owner of restaurant ${restaurantId})`);
+                  await this.notificationsService.createNotification(
+                    restaurant.ownerId,
+                    `رسالة جديدة من ${customerName || 'العميل'}`,
+                    lastMessage,
+                    'chat',
+                    {
+                      screen: 'pharmacy_chat',
+                      chatId: chatId,
+                      requestId: '',
+                      pharmacyName: restaurant.name || restaurantName || 'الصيدلية',
+                      type: 'chat'
+                    }
+                  );
+                }
+              } catch (err) {
+                this.logger.error(`Error sending chat notification to vendor: ${err.message}`);
+              }
+            } else {
+              // Pharmacy sent the message -> Recipient is the Customer
+              try {
+                const customer = await this.prisma.user.findFirst({
+                  where: { firebaseUid: customerId },
+                  select: { id: true }
+                });
+
+                if (customer) {
+                  this.logger.log(`Sending Chat Push Notification to Customer ${customerId}`);
+                  await this.notificationsService.createNotification(
+                    customer.id,
+                    `رسالة جديدة من ${restaurantName || 'الصيدلية'}`,
+                    lastMessage,
+                    'chat',
+                    {
+                      screen: 'pharmacy_chat',
+                      chatId: chatId,
+                      requestId: '',
+                      pharmacyName: restaurantName || 'الصيدلية',
+                      type: 'chat'
+                    }
+                  );
+                }
+              } catch (err) {
+                this.logger.error(`Error sending chat notification to customer: ${err.message}`);
+              }
+            }
+          }
         }
+      }, (error) => {
+        this.logger.error('Error listening to Firebase chats:', error);
+      })
+    );
 
-        const lastProcessed = lastChatMsgTimeMap.get(chatId) || 0;
-        if (msgTime <= lastProcessed) {
-          continue;
-        }
+    // 10. Listen for Prescription Requests collection changes to send push notifications
+    const lastPrescriptionStatusMap = new Map<string, string>();
+    const lastPrescriptionTimeMap = new Map<string, number>();
+    this.unsubscribes.push(
+      firestore.collection('prescription_requests').onSnapshot(async (snapshot) => {
+        const now = Date.now();
+        for (const change of snapshot.docChanges()) {
+          const reqId = change.doc.id;
+          const data = change.doc.data();
+          if (!data) continue;
 
-        lastChatMsgTimeMap.set(chatId, msgTime);
+          const updatedAtTime = data.updatedAt
+            ? (typeof data.updatedAt.toMillis === 'function' ? data.updatedAt.toMillis() : new Date(data.updatedAt).getTime())
+            : (data.createdAt ? (typeof data.createdAt.toMillis === 'function' ? data.createdAt.toMillis() : new Date(data.createdAt).getTime()) : now);
 
-        if (change.type === 'added' || change.type === 'modified') {
-          const { customerId, restaurantId, lastMessage, lastMessageSenderId, restaurantName, customerName } = data;
-          if (!lastMessageSenderId || !lastMessage) continue;
+          const prevStatus = lastPrescriptionStatusMap.get(reqId);
+          const currentStatus = data.status || 'pending';
 
-          if (lastMessageSenderId === customerId) {
-            // Customer sent the message -> Recipient is the Pharmacy Owner (Vendor)
+          if (now - updatedAtTime > 120000) {
+            lastPrescriptionStatusMap.set(reqId, currentStatus);
+            lastPrescriptionTimeMap.set(reqId, updatedAtTime);
+            continue;
+          }
+
+          const lastTime = lastPrescriptionTimeMap.get(reqId) || 0;
+          if (prevStatus === currentStatus && updatedAtTime <= lastTime) {
+            continue;
+          }
+
+          lastPrescriptionStatusMap.set(reqId, currentStatus);
+          lastPrescriptionTimeMap.set(reqId, updatedAtTime);
+
+          const { customerId, restaurantId, chatId, restaurantName, customerName } = data;
+
+          if (change.type === 'added') {
+            // A completely new prescription uploaded by customer -> Send to pharmacy owner
             try {
               const restaurant = await this.prisma.restaurant.findFirst({
                 where: { firebaseId: restaurantId },
@@ -312,154 +455,59 @@ export class FirebaseSyncService implements OnModuleInit {
               });
 
               if (restaurant && restaurant.ownerId) {
-                this.logger.log(`Sending Chat Push Notification to Vendor (Owner of restaurant ${restaurantId})`);
+                this.logger.log(`Sending Prescription Upload Push Notification to Vendor (Owner of restaurant ${restaurantId})`);
                 await this.notificationsService.createNotification(
                   restaurant.ownerId,
-                  `رسالة جديدة من ${customerName || 'العميل'}`,
-                  lastMessage,
-                  'chat',
-                  {
-                    screen: 'pharmacy_chat',
-                    chatId: chatId,
-                    requestId: '',
-                    pharmacyName: restaurant.name || restaurantName || 'الصيدلية',
-                    type: 'chat'
-                  }
-                );
-              }
-            } catch (err) {
-              this.logger.error(`Error sending chat notification to vendor: ${err.message}`);
-            }
-          } else {
-            // Pharmacy sent the message -> Recipient is the Customer
-            try {
-              const customer = await this.prisma.user.findFirst({
-                where: { firebaseUid: customerId },
-                select: { id: true }
-              });
-
-              if (customer) {
-                this.logger.log(`Sending Chat Push Notification to Customer ${customerId}`);
-                await this.notificationsService.createNotification(
-                  customer.id,
-                  `رسالة جديدة من ${restaurantName || 'الصيدلية'}`,
-                  lastMessage,
-                  'chat',
-                  {
-                    screen: 'pharmacy_chat',
-                    chatId: chatId,
-                    requestId: '',
-                    pharmacyName: restaurantName || 'الصيدلية',
-                    type: 'chat'
-                  }
-                );
-              }
-            } catch (err) {
-              this.logger.error(`Error sending chat notification to customer: ${err.message}`);
-            }
-          }
-        }
-      }
-    }, (error) => {
-      this.logger.error('Error listening to Firebase chats:', error);
-    });
-
-    // 10. Listen for Prescription Requests collection changes to send push notifications
-    const lastPrescriptionStatusMap = new Map<string, string>();
-    const lastPrescriptionTimeMap = new Map<string, number>();
-    firestore.collection('prescription_requests').onSnapshot(async (snapshot) => {
-      const now = Date.now();
-      for (const change of snapshot.docChanges()) {
-        const reqId = change.doc.id;
-        const data = change.doc.data();
-        if (!data) continue;
-
-        const updatedAtTime = data.updatedAt
-          ? (typeof data.updatedAt.toMillis === 'function' ? data.updatedAt.toMillis() : new Date(data.updatedAt).getTime())
-          : (data.createdAt ? (typeof data.createdAt.toMillis === 'function' ? data.createdAt.toMillis() : new Date(data.createdAt).getTime()) : now);
-
-        const prevStatus = lastPrescriptionStatusMap.get(reqId);
-        const currentStatus = data.status || 'pending';
-
-        if (now - updatedAtTime > 120000) {
-          lastPrescriptionStatusMap.set(reqId, currentStatus);
-          lastPrescriptionTimeMap.set(reqId, updatedAtTime);
-          continue;
-        }
-
-        const lastTime = lastPrescriptionTimeMap.get(reqId) || 0;
-        if (prevStatus === currentStatus && updatedAtTime <= lastTime) {
-          continue;
-        }
-
-        lastPrescriptionStatusMap.set(reqId, currentStatus);
-        lastPrescriptionTimeMap.set(reqId, updatedAtTime);
-
-        const { customerId, restaurantId, chatId, restaurantName, customerName } = data;
-
-        if (change.type === 'added') {
-          // A completely new prescription uploaded by customer -> Send to pharmacy owner
-          try {
-            const restaurant = await this.prisma.restaurant.findFirst({
-              where: { firebaseId: restaurantId },
-              select: { ownerId: true, name: true }
-            });
-
-            if (restaurant && restaurant.ownerId) {
-              this.logger.log(`Sending Prescription Upload Push Notification to Vendor (Owner of restaurant ${restaurantId})`);
-              await this.notificationsService.createNotification(
-                restaurant.ownerId,
-                'طلب روشتة جديد',
-                `قام العميل ${customerName || ''} برفع روشتة جديدة للمراجعة.`,
-                'prescription_new',
-                {
-                  screen: 'pharmacy_chat',
-                  chatId: chatId,
-                  requestId: reqId,
-                  pharmacyName: restaurant.name || restaurantName || 'الصيدلية',
-                  type: 'prescription_new'
-                }
-              );
-            }
-          } catch (err) {
-            this.logger.error(`Error sending prescription upload notification to vendor: ${err.message}`);
-          }
-        } else if (change.type === 'modified') {
-          // Status updated to quoted -> Send to Customer
-          if (currentStatus === 'quoted' && prevStatus !== 'quoted') {
-            try {
-              const customer = await this.prisma.user.findFirst({
-                where: { firebaseUid: customerId },
-                select: { id: true }
-              });
-
-              if (customer) {
-                this.logger.log(`Sending Prescription Quoted (Review) Push Notification to Customer ${customerId}`);
-                await this.notificationsService.createNotification(
-                  customer.id,
-                  'عرض سعر الروشتة جاهز',
-                  `تمت مراجعة وتسعير الروشتة من قبل ${restaurantName || 'الصيدلية'}. يمكنك مراجعة العرض وقبوله الآن.`,
-                  'prescription_review',
+                  'طلب روشتة جديد',
+                  `قام العميل ${customerName || ''} برفع روشتة جديدة للمراجعة.`,
+                  'prescription_new',
                   {
                     screen: 'pharmacy_chat',
                     chatId: chatId,
                     requestId: reqId,
-                    pharmacyName: restaurantName || 'الصيدلية',
-                    type: 'prescription_review'
+                    pharmacyName: restaurant.name || restaurantName || 'الصيدلية',
+                    type: 'prescription_new'
                   }
                 );
               }
             } catch (err) {
-              this.logger.error(`Error sending prescription quoted notification to customer: ${err.message}`);
+              this.logger.error(`Error sending prescription upload notification to vendor: ${err.message}`);
+            }
+          } else if (change.type === 'modified') {
+            // Status updated to quoted -> Send to Customer
+            if (currentStatus === 'quoted' && prevStatus !== 'quoted') {
+              try {
+                const customer = await this.prisma.user.findFirst({
+                  where: { firebaseUid: customerId },
+                  select: { id: true }
+                });
+
+                if (customer) {
+                  this.logger.log(`Sending Prescription Quoted (Review) Push Notification to Customer ${customerId}`);
+                  await this.notificationsService.createNotification(
+                    customer.id,
+                    'عرض سعر الروشتة جاهز',
+                    `تمت مراجعة وتسعير الروشتة من قبل ${restaurantName || 'الصيدلية'}. يمكنك مراجعة العرض وقبوله الآن.`,
+                    'prescription_review',
+                    {
+                      screen: 'pharmacy_chat',
+                      chatId: chatId,
+                      requestId: reqId,
+                      pharmacyName: restaurantName || 'الصيدلية',
+                      type: 'prescription_review'
+                    }
+                  );
+                }
+              } catch (err) {
+                this.logger.error(`Error sending prescription quoted notification to customer: ${err.message}`);
+              }
             }
           }
         }
-      }
-    }, (error) => {
-      this.logger.error('Error listening to Firebase prescription requests:', error);
-    });
-
-    // 11. Initial syncs are handled automatically by onSnapshot when it first attaches
+      }, (error) => {
+        this.logger.error('Error listening to Firebase prescription requests:', error);
+      })
+    );
   }
 
   private async syncOrder(doc: any, silent = false, isNew = false) {
@@ -1368,164 +1416,172 @@ export class FirebaseSyncService implements OnModuleInit {
     this.logger.log(`💰 Processing earnings for delivered order ${order.id}`);
 
     try {
-      // Idempotency guard: skip if already settled
-      const existingSettlement = await this.prisma.ledger.findFirst({
-        where: { orderId: order.id, type: 'EARNING' },
-      });
-      if (existingSettlement) {
-        this.logger.warn(`Order ${order.id} already settled (Firebase path). Skipping.`);
-        return;
-      }
-
-      const config = await this.prisma.systemConfig.findFirst() || {} as any;
-
-      // Unified split: Restaurant = subtotal (100%), App = serviceFee only
-      // MUST match orders.service.ts handleDelivered exactly
-      const restaurantShare = order.subtotal;
-      const appCommission   = 0;
-      const driverShare     = order.deliveryFee + (order.driverBoost || 0) + (order.tips || 0);
-      const appShare        = order.serviceFee || 0;
-
-      const isCash = order.paymentMethod === 'CASH';
-      const cashCollected = isCash ? order.total : 0;
-
-      this.logger.log(`📊 Order ${order.id}: Resto=${restaurantShare}, Driver=${driverShare}, App=${appShare}, Cash=${cashCollected}`);
-
-      // Update order financials
-      await this.prisma.order.update({
-        where: { id: order.id },
-        data: { appCommission, restaurantShare, driverShare, appShare, cashCollected },
-      });
-
-      // Restaurant earnings
-      if (order.restaurantId) {
-        await this.prisma.restaurant.update({
-          where: { id: order.restaurantId },
-          data: {
-            walletBalance:  { increment: restaurantShare },
-            pendingBalance: { increment: restaurantShare },
-            totalEarnings:  { increment: restaurantShare },
-          },
+      await this.prisma.$transaction(async (tx) => {
+        // Idempotency guard: skip if already settled
+        const existingSettlement = await tx.ledger.findFirst({
+          where: { orderId: order.id, type: 'EARNING' },
         });
-        if (order.restaurant?.ownerId) {
-          await this.prisma.user.update({
-            where: { id: order.restaurant.ownerId },
-            data: {
-              walletBalance: { increment: restaurantShare },
-            },
-          });
-
-          await this.prisma.ledger.create({
-            data: {
-              userId:    order.restaurant.ownerId,
-              orderId:   order.id,
-              type:      'EARNING',
-              amount:    restaurantShare,
-              status:    'completed',
-              signature: SignatureUtil.signLedgerEntry({ userId: order.restaurant.ownerId, orderId: order.id, type: 'EARNING', amount: restaurantShare }),
-            },
-          });
+        if (existingSettlement) {
+          this.logger.warn(`Order ${order.id} already settled (Firebase path). Skipping.`);
+          return;
         }
-      }
 
-      // Driver earnings
-      if (order.driverId) {
-        const driver = await this.prisma.driverProfile.findUnique({
-          where: { id: order.driverId },
-          include: { user: true },
+        const config = await tx.systemConfig.findFirst() || {} as any;
+
+        // Unified split: Restaurant = subtotal (100%), App = serviceFee only
+        // MUST match orders.service.ts handleDelivered exactly
+        const restaurantShare = order.subtotal;
+        const appCommission   = 0;
+        const driverShare     = order.deliveryFee + (order.driverBoost || 0) + (order.tips || 0);
+        const appShare        = order.serviceFee || 0;
+
+        const isCash = order.paymentMethod === 'CASH';
+        const cashCollected = isCash ? order.total : 0;
+
+        this.logger.log(`📊 Order ${order.id}: Resto=${restaurantShare}, Driver=${driverShare}, App=${appShare}, Cash=${cashCollected}`);
+
+        // Update order financials
+        await tx.order.update({
+          where: { id: order.id },
+          data: { appCommission, restaurantShare, driverShare, appShare, cashCollected },
         });
-        if (driver) {
-          const debtIncrease  = isCash ? cashCollected - driverShare : 0;
-          const walletIncrease = isCash ? 0 : driverShare;
-          const debtLimit = config?.driverDebtLimit ?? 1000;
-          const newDebt = driver.debtBalance + debtIncrease;
 
-          await this.prisma.driverProfile.update({
-            where: { id: driver.id },
+        // Restaurant earnings
+        if (order.restaurantId) {
+          await tx.restaurant.update({
+            where: { id: order.restaurantId },
             data: {
-              totalEarnings: { increment: driverShare },
-              debtBalance:   { increment: debtIncrease },
-              totalTrips:    { increment: 1 },
-              isAvailable:   newDebt >= debtLimit ? false : driver.isAvailable,
+              walletBalance:  { increment: restaurantShare },
+              pendingBalance: { increment: restaurantShare },
+              totalEarnings:  { increment: restaurantShare },
             },
           });
-          if (newDebt >= debtLimit) {
-            this.logger.warn(`Driver ${driver.id} suspended — debt limit reached.`);
-          }
-          if (walletIncrease > 0) {
-            await this.prisma.user.update({
-              where: { id: driver.userId },
-              data: { walletBalance: { increment: walletIncrease } },
-            });
-          }
-          await this.prisma.ledger.create({
-            data: {
-              userId:    driver.userId,
-              orderId:   order.id,
-              type:      'EARNING',
-              amount:    driverShare,
-              status:    'pending',
-              signature: SignatureUtil.signLedgerEntry({ userId: driver.userId, orderId: order.id, type: 'EARNING', amount: driverShare }),
-            },
-          });
-          if (isCash && debtIncrease > 0) {
-            await this.prisma.ledger.create({
+          if (order.restaurant?.ownerId) {
+            await tx.user.update({
+              where: { id: order.restaurant.ownerId },
               data: {
-                userId:    driver.userId,
+                walletBalance: { increment: restaurantShare },
+              },
+            });
+
+            await tx.ledger.create({
+              data: {
+                userId:    order.restaurant.ownerId,
                 orderId:   order.id,
-                type:      'DEBT',
-                amount:    debtIncrease,
-                status:    'pending',
-                signature: SignatureUtil.signLedgerEntry({ userId: driver.userId, orderId: order.id, type: 'DEBT', amount: debtIncrease }),
+                type:      'EARNING',
+                amount:    restaurantShare,
+                status:    'completed',
+                signature: SignatureUtil.signLedgerEntry({ userId: order.restaurant.ownerId, orderId: order.id, type: 'EARNING', amount: restaurantShare }),
               },
             });
           }
+        }
 
-          // Sync driver stats back to Firestore directly to avoid circular dependency
-          try {
-            const db = this.firebaseAdmin.getFirestore();
-            if (db) {
-              const driverUser = await this.prisma.user.findUnique({
-                where: { id: driver.userId },
-                include: { driverProfile: true },
-              });
-              if (driverUser && driverUser.firebaseUid) {
-                const wBal = Number(driverUser.walletBalance || 0);
-                await db.collection('users').doc(driverUser.firebaseUid).update({
-                  walletBalance: wBal,
-                }).catch(() => {});
-                
-                if (driverUser.driverProfile) {
-                  const dp = driverUser.driverProfile;
-                  await db.collection('driverProfiles').doc(driverUser.firebaseUid).set({
-                    walletBalance: wBal,
-                    totalEarnings: Number(dp.totalEarnings || 0),
-                    totalTrips: Number(dp.totalTrips || 0),
-                    acceptanceRate: Number(dp.acceptanceRate || 100),
-                    rating: Number(dp.rating || 5.0),
-                  }, { merge: true }).catch(() => {});
-                }
-              }
+        // Driver earnings
+        if (order.driverId) {
+          const driver = await tx.driverProfile.findUnique({
+            where: { id: order.driverId },
+            include: { user: true },
+          });
+          if (driver) {
+            const debtIncrease  = isCash ? cashCollected - driverShare : 0;
+            const walletIncrease = isCash ? 0 : driverShare;
+            const debtLimit = config?.driverDebtLimit ?? 1000;
+            const newDebt = driver.debtBalance + debtIncrease;
+
+            await tx.driverProfile.update({
+              where: { id: driver.id },
+              data: {
+                totalEarnings: { increment: driverShare },
+                debtBalance:   { increment: debtIncrease },
+                totalTrips:    { increment: 1 },
+                isAvailable:   newDebt >= debtLimit ? false : driver.isAvailable,
+              },
+            });
+            if (newDebt >= debtLimit) {
+              this.logger.warn(`Driver ${driver.id} suspended — debt limit reached.`);
             }
-          } catch (err) {
-            this.logger.error(`Failed to sync driver stats to Firestore in sync service: ${err.message}`);
+            if (walletIncrease > 0) {
+              await tx.user.update({
+                where: { id: driver.userId },
+                data: { walletBalance: { increment: walletIncrease } },
+              });
+            }
+            await tx.ledger.create({
+              data: {
+                userId:    driver.userId,
+                orderId:   order.id,
+                type:      'EARNING',
+                amount:    driverShare,
+                status:    'pending',
+                signature: SignatureUtil.signLedgerEntry({ userId: driver.userId, orderId: order.id, type: 'EARNING', amount: driverShare }),
+              },
+            });
+            if (isCash && debtIncrease > 0) {
+              await tx.ledger.create({
+                data: {
+                  userId:    driver.userId,
+                  orderId:   order.id,
+                  type:      'DEBT',
+                  amount:    debtIncrease,
+                  status:    'pending',
+                  signature: SignatureUtil.signLedgerEntry({ userId: driver.userId, orderId: order.id, type: 'DEBT', amount: debtIncrease }),
+                },
+              });
+            }
+
+            // Sync driver stats back to Firestore directly to avoid circular dependency
+            setImmediate(async () => {
+              try {
+                const db = this.firebaseAdmin.getFirestore();
+                if (db) {
+                  const driverUser = await this.prisma.user.findUnique({
+                    where: { id: driver.userId },
+                    include: { driverProfile: true },
+                  });
+                  if (driverUser && driverUser.firebaseUid) {
+                    const wBal = Number(driverUser.walletBalance || 0);
+                    await db.collection('users').doc(driverUser.firebaseUid).update({
+                      walletBalance: wBal,
+                    }).catch(() => {});
+                    
+                    if (driverUser.driverProfile) {
+                      const dp = driverUser.driverProfile;
+                      await db.collection('driverProfiles').doc(driverUser.firebaseUid).set({
+                        walletBalance: wBal,
+                        totalEarnings: Number(dp.totalEarnings || 0),
+                        totalTrips: Number(dp.totalTrips || 0),
+                        acceptanceRate: Number(dp.acceptanceRate || 100),
+                        rating: Number(dp.rating || 5.0),
+                      }, { merge: true }).catch(() => {});
+                    }
+                  }
+                }
+              } catch (err) {
+                this.logger.error(`Failed to sync driver stats to Firestore in sync service: ${err.message}`);
+              }
+            });
           }
         }
-      }
 
-      // Loyalty Points (same formula as OrdersService.handleDelivered)
-      if (order.customerId) {
-        const loyaltyRate   = config?.loyaltyPointsPerEGP ?? 1.0;
-        const pointsEarned  = Math.floor(order.total * loyaltyRate);
-        if (pointsEarned > 0) {
-          await this.ordersService.awardLoyaltyPointsForOrder(order.customerId, pointsEarned);
+        // Loyalty Points (same formula as OrdersService.handleDelivered)
+        if (order.customerId) {
+          const loyaltyRate   = config?.loyaltyPointsPerEGP ?? 1.0;
+          const pointsEarned  = Math.floor(order.total * loyaltyRate);
+          if (pointsEarned > 0) {
+            setImmediate(async () => {
+              await this.ordersService.awardLoyaltyPointsForOrder(order.customerId, pointsEarned).catch(() => {});
+            });
+          }
         }
-      }
 
-      // Close active prescription chat if this is a pharmacy order
-      if (order.restaurant && order.restaurant.vendorType === 'pharmacy') {
-        await this.closePrescriptionChat(order.customerId, order.restaurantId).catch(() => {});
-      }
+        // Close active prescription chat if this is a pharmacy order
+        if (order.restaurant && order.restaurant.vendorType === 'pharmacy') {
+          setImmediate(async () => {
+            await this.closePrescriptionChat(order.customerId, order.restaurantId).catch(() => {});
+          });
+        }
+      });
     } catch (err) {
       this.logger.error(`Failed to process earnings for order ${order.id}:`, err);
     }
@@ -1737,6 +1793,9 @@ export class FirebaseSyncService implements OnModuleInit {
 
   @Cron(CronExpression.EVERY_DAY_AT_4AM)
   async verifyAndReconcileDatabases() {
+    const syncFirebaseToBackend = process.env.SYNC_FIREBASE_TO_BACKEND !== 'false';
+    if (!syncFirebaseToBackend) return;
+
     this.logger.log('⏰ Starting scheduled daily database reconcile cron job (4:00 AM)...');
     const firestore = this.firebaseAdmin.getFirestore();
     if (!firestore) {
